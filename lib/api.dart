@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'package:http/http.dart' as http_pkg;
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart' as $wkt;
 
 import 'package:connectrpc/connect.dart' as connect;
@@ -47,14 +47,14 @@ class EasyLabClient {
   final lab_client.OpsServiceClient _ops;
   final lab_client.RegistryServiceClient _registry;
 
-  late final http.Client http;
+  late final http_pkg.Client http;
 
   EasyLabClient({required this.baseUrl, required this.token})
       : _agent = agent_client.AgentServiceClient(_build(baseUrl, token)),
         _lab = lab_client.LabServiceClient(_build(baseUrl, token)),
         _ops = lab_client.OpsServiceClient(_build(baseUrl, token)),
         _registry = lab_client.RegistryServiceClient(_build(baseUrl, token)) {
-    http = http.Client();
+    http = http_pkg.Client();
   }
 
   static connect.Transport _build(String baseUrl, String token) {
@@ -295,7 +295,10 @@ class EasyLabClient {
 
   Future<Map<String, dynamic>> toolConfig() async {
     final r = await _agent.getToolConfig(agent_pb.GetToolConfigRequest());
-    return _structToMap(r.config?.values ?? {});
+    final values = r.config?.values ?? {};
+    final out = <String, dynamic>{};
+    values.forEach((k, v) => out[k] = _fromValue(v));
+    return out;
   }
 
   Future<Map<String, dynamic>> setToolConfig(Map<String, dynamic> cfg) async {
@@ -583,6 +586,7 @@ class EasyLabClient {
               id: t.id,
               command: t.command,
               state: t.state,
+              exitCode: 0,
             ))
         .toList();
   }
@@ -748,7 +752,7 @@ FileCommit commitFromPb(lab_pb.CommitInfo c) => FileCommit(
       message: c.message,
     );
 
-Map<String, dynamic> _structToMap(\$wkt.Struct? s) {
+Map<String, dynamic> _structToMap($wkt.Struct? s) {
   final out = <String, dynamic>{};
   (s?.fields ?? {}).forEach((k, v) {
     out[k] = _fromValue(v);
@@ -756,51 +760,52 @@ Map<String, dynamic> _structToMap(\$wkt.Struct? s) {
   return out;
 }
 
-dynamic _fromValue(\$wkt.Value v) {
-  switch (v.whichValue()) {
-    case 1:
-      return v.nullValue_;
-    case 2:
+dynamic _fromValue($wkt.Value v) {
+  switch (v.whichKind()) {
+    case $wkt.Value_Kind.nullValue:
+      return v.nullValue;
+    case $wkt.Value_Kind.numberValue:
       return v.numberValue;
-    case 3:
+    case $wkt.Value_Kind.stringValue:
       return v.stringValue;
-    case 4:
+    case $wkt.Value_Kind.boolValue:
       return v.boolValue;
-    case 5:
+    case $wkt.Value_Kind.structValue:
       return _structToMap(v.structValue);
-    case 6:
+    case $wkt.Value_Kind.listValue:
       return v.listValue.values.map(_fromValue).toList();
+    default:
+      return null;
   }
-  return null;
 }
 
-\$wkt.Struct _mapToStruct(Map<String, dynamic> v) {
-  final s = \$wkt.Struct();
+$wkt.Struct _mapToStruct(Map<String, dynamic> v) {
+  final s = $wkt.Struct();
   v.forEach((k, val) {
     s.fields[k] = _toValue(val);
   });
   return s;
 }
 
-\$wkt.Value _toValue(dynamic v) {
-  if (v == null) return \$wkt.Value()..nullValue_ = \$wkt.NullValue.NULL_VALUE;
-  if (v is bool) return \$wkt.Value()..boolValue = v;
-  if (v is int) return \$wkt.Value()..numberValue = v.toDouble();
-  if (v is double) return \$wkt.Value()..numberValue = v;
-  if (v is String) return \$wkt.Value()..stringValue = v;
+$wkt.Value _toValue(dynamic v) {
+  if (v == null) return $wkt.Value()..nullValue = $wkt.NullValue.NULL_VALUE;
+  if (v is bool) return $wkt.Value()..boolValue = v;
+  if (v is int) return $wkt.Value()..numberValue = v.toDouble();
+  if (v is double) return $wkt.Value()..numberValue = v;
+  if (v is String) return $wkt.Value()..stringValue = v;
   if (v is Map) {
-    final s = \$wkt.Struct();
+    final s = $wkt.Struct();
     v.forEach((k, val) => s.fields[k as String] = _toValue(val));
-    return \$wkt.Value()..structValue = s;
+    return $wkt.Value()..structValue = s;
   }
   if (v is List) {
-    final l = \$wkt.ListValue();
+    final l = $wkt.ListValue();
     for (final e in v) {
       l.values.add(_toValue(e));
     }
-    return \$wkt.Value()..listValue = l;
+    return $wkt.Value()..listValue = l;
   }
-  return \$wkt.Value()..stringValue = v.toString();
+  return $wkt.Value()..stringValue = v.toString();
 }
 
 Map<String, dynamic> _serviceToMap(lab_pb.ServiceInfo? s) {
