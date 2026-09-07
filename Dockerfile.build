@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+# Build stage: compile the Flutter web app with the official SDK image.
+ARG REGISTRY=ghcr.io
+FROM ${REGISTRY}/ghcr_flutter/flutter:3.32-stable AS build
+ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20 \
+    PUB_HOSTED_URL=https://pub.flutter-io.cn \
+    FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn
+WORKDIR /app
+COPY pubspec.yaml pubspec.lock ./
+RUN flutter pub get --offline 2>/dev/null || flutter pub get
+COPY . .
+RUN flutter build web --release

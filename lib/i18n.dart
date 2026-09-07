@@ -35,7 +35,7 @@ class I18n {
 class Texts {
   static const Map<String, ({String zh, String en})> _m = {
     // App / shell
-    'appTitle': (zh: 'ZergX', en: 'ZergX'),
+    'appTitle': (zh: 'EasyLab', en: 'EasyLab'),
     'gatewayUrl': (zh: '网关地址', en: 'Gateway URL'),
     'tokenLabel': (zh: '令牌', en: 'Token'),
     'connect': (zh: '连接', en: 'Connect'),

@@ -181,13 +181,9 @@ Future<void> showCloneDialog(BuildContext context, AppStore store, String org) a
     final name = nameCtrl.text.trim();
     if (url.isNotEmpty && name.isNotEmpty) {
       try {
-        await store.api.cloneRepo(
-          org,
-          name,
-          url,
-          tokenCtrl.text.trim().isEmpty ? null : tokenCtrl.text.trim(),
-          revCtrl.text.trim().isEmpty ? null : revCtrl.text.trim(),
-        );
+        await store.api.cloneRepo(org, name, url,
+            (tokenCtrl.text.trim().isEmpty ? '' : tokenCtrl.text.trim()) +
+                (revCtrl.text.trim().isEmpty ? '' : '@${revCtrl.text.trim()}'));
         await store.refreshRepos();
         await store.refreshSessions();
       } catch (e) {

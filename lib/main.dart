@@ -15,7 +15,8 @@ import 'screens/config.dart';
 import 'screens/containers.dart';
 import 'screens/packages.dart';
 
-const defaultBaseUrl = 'https://platform.zergx.10.199.64.20.nip.io';
+// Same-origin through the flutter nginx reverse proxy (/api, /v2).
+const defaultBaseUrl = '';
 
 void main() {
   runApp(const ZergxApp());
@@ -359,7 +360,7 @@ class _SessionsHome extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ZergX'),
+        title: const Text('EasyLab'),
         actions: [
           IconButton(
             icon: Icon(Icons.search_rounded, color: colorsOf(context).primary),
@@ -439,7 +440,7 @@ class _SetupScreenState extends State<_SetupScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text('ZergX',
+                    Text('EasyLab',
                         style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: AppSpacing.xl),
                     TextField(

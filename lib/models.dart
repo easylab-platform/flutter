@@ -61,27 +61,40 @@ class Session {
     this.lastMessagePreview = '',
   });
 
-  factory Session.fromJson(Map<String, dynamic> j) => Session(
-        id: j['id'] as String? ?? '',
-        org: j['org'] as String? ?? '',
-        repo: j['repo'] as String? ?? '',
-        branch: j['branch'] as String? ?? '',
-        model: j['model'] as String? ?? '',
-        preset: j['preset'] as String? ?? '',
-        tipId: j['tip_id'] as String?,
-        maxTurns: j['max_turns'] as int?,
-        systemPrompt: j['system_prompt'] as String?,
-        inputTokens: j['input_tokens'] as int?,
-        outputTokens: j['output_tokens'] as int?,
-        totalTokens: j['total_tokens'] as int?,
-        lastInputTokens: j['last_input_tokens'] as int?,
-        lastOutputTokens: j['last_output_tokens'] as int?,
-        createdAt: j['created_at'] as String? ?? '',
-        updatedAt: j['updated_at'] as String? ?? '',
-        unreadCount: j['unread_count'] as int?,
-        lastMessageAt: j['last_message_at'] as String? ?? '',
-        lastMessagePreview: j['last_message_preview'] as String? ?? '',
-      );
+  factory Session.fromJson(Map<String, dynamic> j) {
+    final id = j['id'] as String? ?? j['name'] as String? ?? '';
+    var org = j['org'] as String? ?? '';
+    var repo = j['repo'] as String? ?? '';
+    var branch = j['branch'] as String? ?? '';
+    // Sessions created via adoptSession encode org-repo-branch in the name.
+    final segs = id.split('-');
+    if (org.isEmpty && repo.isEmpty && segs.length >= 3) {
+      org = segs[0];
+      repo = segs[1];
+      branch = segs.sublist(2).join('-');
+    }
+    return Session(
+      id: id,
+      org: org,
+      repo: repo,
+      branch: branch,
+      model: j['model'] as String? ?? '',
+      preset: j['preset'] as String? ?? '',
+      tipId: j['tip_id'] as String?,
+      maxTurns: j['max_turns'] as int?,
+      systemPrompt: j['system_prompt'] as String?,
+      inputTokens: j['input_tokens'] as int?,
+      outputTokens: j['output_tokens'] as int?,
+      totalTokens: j['total_tokens'] as int?,
+      lastInputTokens: j['last_input_tokens'] as int?,
+      lastOutputTokens: j['last_output_tokens'] as int?,
+      createdAt: j['created_at'] as String? ?? '',
+      updatedAt: j['updated_at'] as String? ?? '',
+      unreadCount: j['unread_count'] as int?,
+      lastMessageAt: j['last_message_at'] as String? ?? '',
+      lastMessagePreview: j['last_message_preview'] as String? ?? '',
+    );
+  }
 
   String get sessionName =>
       org.isNotEmpty ? '$org:$repo:$branch' : id;
@@ -314,14 +327,23 @@ class Message {
     this.createdAt,
   });
 
-  factory Message.fromJson(Map<String, dynamic> j) => Message(
-        id: j['id'] as String? ?? '',
-        role: j['role'] as String? ?? '',
-        parts: (j['parts'] as List? ?? [])
-            .map((e) => MessagePart.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        createdAt: j['created_at'] as String?,
-      );
+  factory Message.fromJson(Map<String, dynamic> j) {
+    var parts = (j['parts'] as List? ?? [])
+        .map((e) => MessagePart.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final content = j['content'] as String?;
+    if (parts.isEmpty && content != null && content.isNotEmpty) {
+      parts = [
+        MessagePart(id: j['id'] as String? ?? '', type: 'text', text: content)
+      ];
+    }
+    return Message(
+      id: j['id'] as String? ?? '',
+      role: j['role'] as String? ?? '',
+      parts: parts,
+      createdAt: j['created_at'] as String?,
+    );
+  }
 }
 
 // ---- chat domain (streaming state) ----
@@ -444,8 +466,9 @@ class FileEntry {
   });
   factory FileEntry.fromJson(Map<String, dynamic> j) => FileEntry(
         name: j['name'] as String? ?? '',
-        path: j['path'] as String? ?? '',
-        isDir: j['is_dir'] as bool? ?? false,
+        path: j['path'] as String? ?? (j['name'] as String? ?? ''),
+        isDir: (j['is_dir'] as bool?) ??
+            ((j['kind'] as String?) == 'tree' || (j['kind'] as String?) == 'dir'),
         size: j['size'] as int? ?? 0,
       );
 }
@@ -474,11 +497,12 @@ class FileCommit {
     required this.message,
   });
   factory FileCommit.fromJson(Map<String, dynamic> j) => FileCommit(
-        changeId: j['change_id'] as String? ?? '',
-        commitId: j['commit_id'] as String? ?? '',
+        changeId: j['change_id'] as String? ?? j['revision_id'] as String? ?? '',
+        commitId: j['commit_id'] as String? ?? j['revision_id'] as String? ?? '',
         author: j['author'] as String? ?? '',
-        timestamp: j['timestamp'] as String? ?? '',
-        message: j['message'] as String? ?? '',
+        timestamp: j['timestamp'] as String? ??
+            ((j['created_ms'] as int?)?.toString() ?? ''),
+        message: j['message'] as String? ?? j['description'] as String? ?? '',
       );
 }
 
@@ -705,11 +729,14 @@ class Sandbox {
     required this.syncedRev,
   });
   factory Sandbox.fromJson(Map<String, dynamic> j) => Sandbox(
-        containerId: j['container_id'] as String? ?? '',
+        containerId: j['container_id'] as String? ??
+            ((j['container_ids'] as List?)?.firstOrNull?.toString() ??
+                j['name'] as String? ??
+                ''),
         session: j['session'] as String? ?? '',
-        podName: j['pod_name'] as String? ?? '',
-        status: j['status'] as String? ?? '',
-        workerUrl: j['worker_url'] as String? ?? '',
+        podName: j['pod_name'] as String? ?? j['name'] as String? ?? '',
+        status: j['status'] as String? ?? j['phase'] as String? ?? '',
+        workerUrl: j['worker_url'] as String? ?? j['worker_url'] as String? ?? '',
         podIp: j['pod_ip'] as String? ?? '',
         syncedRev: j['synced_rev'] as String? ?? '',
       );
@@ -741,7 +768,9 @@ class Deployment {
         ready: j['ready'] as int? ?? 0,
         namespace: j['namespace'] as String? ?? '',
         age: j['age'] as String? ?? '',
-        ports: (j['ports'] as List? ?? []).map((e) => e as int).toList(),
+        ports: (j['ports'] as List? ?? [])
+            .map((e) => e is int ? e : 0)
+            .toList(),
         session: j['session'] as String?,
       );
 }
@@ -988,7 +1017,7 @@ class GitTag {
   GitTag({required this.name, required this.target});
   factory GitTag.fromJson(Map<String, dynamic> j) => GitTag(
         name: j['name'] as String? ?? '',
-        target: j['target'] as String? ?? '',
+        target: j['target'] as String? ?? j['revision_id'] as String? ?? '',
       );
 }
 

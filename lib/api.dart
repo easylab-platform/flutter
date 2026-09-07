@@ -21,7 +21,10 @@ class TaskLogLine {
   TaskLogLine(this.stream, this.line);
 }
 
-/// Thin client over the zergx gateway, mirroring the api-*.ts modules.
+/// Thin client over the EasyLab gateway (easylab :8080), which fans out to
+/// the Lab core (/api/v1/repo...), the ops surface (/api/v1/ops...), the
+/// embedded agent session backend (/api/v1/sessions..., proxied) and the
+/// package registry (/v2, /api/v1/packages).
 class ZergxApi {
   final String baseUrl;
   final String token;
@@ -86,15 +89,6 @@ class ZergxApi {
     return _decode(r);
   }
 
-  Future<dynamic> _put(String path, Object? body) async {
-    final r = await client.put(
-      _u(path),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(r);
-  }
-
   Future<dynamic> _del(String path) async {
     final r = await client.delete(_u(path), headers: _headers);
     return _decode(r);
@@ -108,7 +102,7 @@ class ZergxApi {
         .toList();
   }
 
-  // ---- sessions ----
+  // ---- sessions (agent backend, proxied through the gateway) ----
 
   Future<List<Session>> listSessions() async {
     final j = await _get('/api/v1/sessions') as Map<String, dynamic>;
@@ -117,7 +111,11 @@ class ZergxApi {
 
   Future<Session> createSession(Map<String, dynamic> params) async {
     final j = await _post('/api/v1/sessions', params) as Map<String, dynamic>;
-    return Session.fromJson(j['session'] as Map<String, dynamic>);
+    final name = j['session_name'] as String? ?? '';
+    if (name.isEmpty) return Session.fromJson(j);
+    final got = await _get('/api/v1/sessions/${_enc(name)}');
+    return Session.fromJson((got as Map<String, dynamic>)['session']
+        as Map<String, dynamic>);
   }
 
   Future<Session> getSession(String id) async {
@@ -128,9 +126,8 @@ class ZergxApi {
   Future<void> deleteSession(String id) => _del('/api/v1/sessions/${_enc(id)}');
 
   Future<String> prompt(String id, String prompt) async {
-    final j = await _post('/api/v1/sessions/${_enc(id)}/prompt', {'prompt': prompt})
-        as Map<String, dynamic>;
-    return j['messageId'] as String? ?? '';
+    await _post('/api/v1/sessions/${_enc(id)}/prompt', {'prompt': prompt});
+    return '';
   }
 
   Future<(List<Message>, bool)> messages(String id,
@@ -146,8 +143,8 @@ class ZergxApi {
   Future<String> switchModel(String id, String model) async {
     final j =
         await _post('/api/v1/sessions/${_enc(id)}/model', {'model': model})
-            as Map<String, dynamic>;
-    return j['model'] as String? ?? '';
+        as Map<String, dynamic>;
+    return j['model'] as String? ?? model;
   }
 
   Future<Session> settings(String id, Map<String, dynamic> settings) async {
@@ -155,13 +152,15 @@ class ZergxApi {
     body.removeWhere((_, v) => v == null);
     final j = await _patch('/api/v1/sessions/${_enc(id)}/settings', body)
         as Map<String, dynamic>;
-    return Session.fromJson(j['session'] as Map<String, dynamic>);
+    return Session.fromJson(
+        (j['session'] as Map<String, dynamic>?) ?? j);
   }
 
   Future<Session> fork(String id, String branch) async {
     final j = await _post('/api/v1/sessions/${_enc(id)}/fork', {'branch': branch})
         as Map<String, dynamic>;
-    return Session.fromJson(j['session'] as Map<String, dynamic>);
+    return Session.fromJson(
+        (j['session'] as Map<String, dynamic>?) ?? j);
   }
 
   Future<void> revert(String id, String? messageId) =>
@@ -170,7 +169,7 @@ class ZergxApi {
   Future<bool> interrupt(String id) async {
     final j = await _post('/api/v1/sessions/${_enc(id)}/interrupt', null)
         as Map<String, dynamic>;
-    return j['interrupted'] == true;
+    return j['ok'] == true || j['interrupted'] == true;
   }
 
   Future<bool> compact(String id) async {
@@ -191,15 +190,9 @@ class ZergxApi {
     return _list(j, MailboxEntry.fromJson, 'entries');
   }
 
-  Future<List<ChangeEntry>> changes(String id) async {
-    final j = await _get('/api/v1/sessions/${_enc(id)}/changes') as Map<String, dynamic>;
-    return _list(j, ChangeEntry.fromJson, 'changes');
-  }
-
-  Future<List<Todo>> todos(String id) async {
-    final j = await _get('/api/v1/sessions/${_enc(id)}/todos') as Map<String, dynamic>;
-    return _list(j, Todo.fromJson, 'todos');
-  }
+  // The agent backend has no changes/todos surfaces; keep the UI contract.
+  Future<List<ChangeEntry>> changes(String id) async => [];
+  Future<List<Todo>> todos(String id) async => [];
 
   // ---- stream (SSE) ----
 
@@ -215,219 +208,294 @@ class ZergxApi {
         ctrl.addError(ApiException(resp.statusCode, 'stream ${resp.statusCode}'));
         return;
       }
-      resp.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen(
-        (line) {
-          if (!line.startsWith('data:')) return;
-          final data = line.substring(5).trim();
-          if (data.isEmpty) return;
-          try {
-            final j = jsonDecode(data);
-            if (j is Map<String, dynamic>) {
-              ctrl.add(StreamEvent(
-                  j['event'] as String? ?? '',
-                  (j['params'] as Map?)?.cast<String, dynamic>()));
+      final lines = <String>[];
+      StreamSubscription? sub;
+      sub = resp.stream.transform(const Utf8Decoder(allowMalformed: true)).listen(
+        (chunk) {
+          for (final line in chunk.split('\n')) {
+            if (line.isEmpty) {
+              if (lines.isNotEmpty) _emit(ctrl, lines);
+              lines.clear();
+              continue;
             }
-          } catch (_) {}
+            lines.add(line);
+          }
         },
-        onError: ctrl.addError,
-        onDone: ctrl.close,
+        onError: (Object e) => ctrl.addError(e),
+        onDone: () {
+          if (lines.isNotEmpty) _emit(ctrl, lines);
+          ctrl.close();
+        },
         cancelOnError: false,
       );
-    }).catchError((Object e) {
+      ctrl.onCancel = () => sub?.cancel();
+    }, onError: (Object e) {
       ctrl.addError(e);
       ctrl.close();
     });
     return ctrl.stream;
   }
 
-  /// SSE task log: POST returns `{ok, build_id}`; this streams
-  /// `/api/v1/builds/{id}/stream` with `log`/`state`/`done` events.
-  Stream<dynamic> taskStream(String buildId) {
-    final req = http.Request('GET', _u('/api/v1/builds/${_enc(buildId)}/stream'))
+  void _emit(StreamController<StreamEvent> ctrl, List<String> lines) {
+    String event = 'message';
+    final data = StringBuffer();
+    for (final line in lines) {
+      if (line.startsWith('event:')) {
+        event = line.substring(6).trim();
+      } else if (line.startsWith('data:')) {
+        if (data.isNotEmpty) data.write('\n');
+        data.write(line.substring(5).trim());
+      }
+    }
+    Map<String, dynamic>? params;
+    final text = data.toString();
+    if (text.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(text);
+        if (decoded is Map<String, dynamic>) params = decoded;
+      } catch (_) {/* non-JSON data: ignore */ }
+    }
+    ctrl.add(StreamEvent(event, params));
+  }
+
+  /// `/api/v1/ops/tasks/{id}/stream` build/task events (log/state/done).
+  Stream<TaskLogLine> buildStream(String buildId) {
+    final req = http.Request(
+        'GET', _u('/api/v1/ops/tasks/${_enc(buildId)}/stream'))
       ..headers.addAll(_headers);
-    final ctrl = StreamController<dynamic>();
-    final client = this.client;
+
+    final ctrl = StreamController<TaskLogLine>();
     client.send(req).then((resp) {
       if (resp.statusCode != 200) {
         ctrl.addError(ApiException(resp.statusCode, 'stream ${resp.statusCode}'));
         return;
       }
-      resp.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen(
-        (line) {
-          if (!line.startsWith('data:')) return;
-          final data = line.substring(5).trim();
-          if (data.isEmpty) return;
-          try {
-            ctrl.add(jsonDecode(data));
-          } catch (_) {}
+      final lines = <String>[];
+      StreamSubscription? sub;
+      sub = resp.stream.transform(const Utf8Decoder(allowMalformed: true)).listen(
+        (chunk) {
+          for (final line in chunk.split('\n')) {
+            if (line.isEmpty) {
+              _emitTask(ctrl, lines);
+              lines.clear();
+              continue;
+            }
+            lines.add(line);
+          }
         },
-        onError: ctrl.addError,
-        onDone: ctrl.close,
+        onError: (Object e) => ctrl.addError(e),
+        onDone: () {
+          _emitTask(ctrl, lines);
+          ctrl.close();
+        },
         cancelOnError: false,
       );
-    }).catchError((Object e) {
+      ctrl.onCancel = () => sub?.cancel();
+    }, onError: (Object e) {
       ctrl.addError(e);
       ctrl.close();
     });
     return ctrl.stream;
   }
 
-  // ---- repos ----
+  void _emitTask(StreamController<TaskLogLine> ctrl, List<String> lines) {
+    String event = 'log';
+    final data = StringBuffer();
+    for (final line in lines) {
+      if (line.startsWith('event:')) {
+        event = line.substring(6).trim();
+      } else if (line.startsWith('data:')) {
+        if (data.isNotEmpty) data.write('\n');
+        data.write(line.substring(5).trim());
+      }
+    }
+    if (event == 'done') {
+      ctrl.close();
+      return;
+    }
+    ctrl.add(TaskLogLine(event, data.toString()));
+  }
+
+  // ---- repositories (EasyLab Lab core, revision-native) ----
 
   Future<List<OrgNode>> repos() async {
-    final j = await _get('/api/v1/repos') as Map<String, dynamic>;
-    return _list(j, OrgNode.fromJson, 'orgs');
+    final j = await _get('/api/v1/repo') as List;
+    final byOrg = <String, List<RepoNode>>{};
+    for (final e in j) {
+      final m = e as Map<String, dynamic>;
+      final org = m['namespace'] as String? ?? '';
+      final repo = m['name'] as String? ?? '';
+      byOrg.putIfAbsent(org, () => []).add(RepoNode(
+            repo: repo,
+            bookmarks: [],
+          ));
+    }
+    return byOrg.entries.map((e) => OrgNode(org: e.key, repos: e.value)).toList();
   }
 
   Future<List<FileEntry>> listFiles(String org, String repo, String dir,
-      [String? branch]) async {
+      [String? ref]) async {
     final query = <String, dynamic>{
-      'org': org,
-      'repo': repo,
-      'path': dir,
-      'depth': '1',
-      if (branch != null && branch.isNotEmpty) 'branch': branch,
+      if (ref != null && ref.isNotEmpty) 'ref': ref,
+      if (dir.isNotEmpty) 'path': dir,
     };
-    final j = await _get('/api/v1/fs/list', query) as Map<String, dynamic>;
+    final j = await _get(
+        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/tree', query) as Map<String, dynamic>;
     return _list(j, FileEntry.fromJson, 'entries');
   }
 
   Future<String> readFile(String org, String repo, String filePath,
-      [String? branch]) async {
+      [String? ref]) async {
     final query = <String, dynamic>{
-      'org': org,
-      'repo': repo,
-      'path': filePath,
-      if (branch != null && branch.isNotEmpty) 'branch': branch,
+      if (ref != null && ref.isNotEmpty) 'ref': ref,
     };
-    final j = await _get('/api/v1/fs/read', query) as Map<String, dynamic>;
-    return j['content'] as String? ?? '';
-  }
-
-  Future<Session> forkRepo(Map<String, dynamic> params) async {
-    final j = await _post('/api/v1/repos/fork', params) as Map<String, dynamic>;
-    return Session.fromJson(j['session'] as Map<String, dynamic>);
+    final j = await _get(
+        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/contents/${_enc(filePath)}',
+        query) as Map<String, dynamic>;
+    return utf8.decode(base64Decode(j['content'] as String? ?? ''));
   }
 
   Future<String> adoptSession(String org, String repo, String bookmark) async {
-    final j = await _post(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/bookmarks/${_enc(bookmark)}/session',
-      null,
-    ) as Map<String, dynamic>;
-    return j['session_name'] as String? ?? '';
+    // The agent backend keys sessions by name; adopting a repo/branch creates
+    // (or returns) the canonical session for that workspace.
+    final name = '$org-$repo-${bookmark.isEmpty ? 'main' : bookmark}';
+    final j = await _post('/api/v1/sessions', {
+      'name': name,
+      'org': org,
+      'repo': repo,
+      'branch': bookmark.isEmpty ? 'main' : bookmark,
+    }) as Map<String, dynamic>;
+    return j['session_name'] as String? ?? name;
   }
 
-  Future<void> ensureOrg(String org) => _post('/api/v1/repos/ensure-org', {'org': org});
+  Future<void> ensureOrg(String org) =>
+      _post('/api/v1/repos/ensure-org', {'org': org});
 
   Future<void> ensureRepo(String org, String repo) =>
       _post('/api/v1/repos/ensure', {'org': org, 'repo': repo});
 
   Future<void> cloneRepo(String org, String repo, String gitUrl,
-          [String? token, String? rev]) =>
-      _post('/api/v1/repos/clone', {
-        'org': org,
-        'repo': repo,
-        'git_url': gitUrl,
-        'token': ?token,
-        'rev': ?rev,
-      });
+      [String? token, String? rev]) async {
+    await ensureRepo(org, repo);
+    var url = gitUrl;
+    if (token != null && token.isNotEmpty) {
+      // http(s) credentials-style token, appended to the URL authority.
+      final m = RegExp(r'^(https?://)(.*)$').firstMatch(url);
+      if (m != null) {
+        url = '${m.group(1)}${Uri.encodeComponent(token)}@${m.group(2)}';
+      }
+    }
+    await _post('/api/v1/repo/${_enc(org)}/${_enc(repo)}/mirror/pull', {
+      'url': url,
+      if (rev != null && rev.isNotEmpty) 'rev': rev,
+    });
+  }
 
   Future<void> deleteBookmark(String org, String repo, String bookmark) =>
-      _del('/api/v1/repos/${_enc(org)}/${_enc(repo)}/${_enc(bookmark)}');
+      _del('/api/v1/repo/${_enc(org)}/${_enc(repo)}/branches/${_enc(bookmark)}');
 
   Future<void> deleteRepo(String org, String repo) =>
-      _del('/api/v1/repos/${_enc(org)}/${_enc(repo)}');
+      _del('/api/v1/repo/${_enc(org)}/${_enc(repo)}');
 
-  Future<void> deleteOrg(String org) => _del('/api/v1/repos/${_enc(org)}');
+  Future<void> deleteOrg(String org) async {
+    final nodes = await repos();
+    final node = nodes.where((n) => n.org == org).firstOrNull;
+    if (node == null) return;
+    for (final r in node.repos) {
+      await deleteRepo(org, r.repo);
+    }
+  }
 
-  Future<List<DiffFile>> diffChange(
-      String org, String repo, String changeId) async {
+  Future<List<DiffFile>> diffChange(String org, String repo, String changeId,
+      [String? path]) async {
+    final query = <String, dynamic>{
+      if (path != null && path.isNotEmpty) 'path': path,
+    };
     final j = await _get(
-        '/api/v1/repos/${_enc(org)}/${_enc(repo)}/diff/${_enc(changeId)}')
-        as Map<String, dynamic>;
+        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/revisions/${_enc(changeId)}/diff',
+        query) as Map<String, dynamic>;
     return _list(j, DiffFile.fromJson, 'files');
   }
 
-  Future<String> fileAtChange(
-      String org, String repo, String changeId, String filePath) async {
+  Future<String> fileAtChange(String org, String repo, String changeId,
+      String filePath) async {
     final j = await _get(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/file/${_enc(changeId)}',
-      {'path': filePath},
-    ) as Map<String, dynamic>;
-    return j['content'] as String? ?? '';
+        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/contents/${_enc(filePath)}',
+        {'ref': changeId}) as Map<String, dynamic>;
+    return utf8.decode(base64Decode(j['content'] as String? ?? ''));
   }
 
   Future<List<FileCommit>> fileLog(String org, String repo, String filePath,
-      [String? branch, int? limit]) async {
+      [String? ref]) async {
     final query = <String, dynamic>{
       'path': filePath,
-      if (branch != null && branch.isNotEmpty) 'branch': branch,
-      'limit': ?limit,
+      if (ref != null && ref.isNotEmpty) 'ref': ref,
     };
     final j = await _get(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/file-log',
-      query,
-    ) as Map<String, dynamic>;
-    return _list(j, FileCommit.fromJson, 'commits');
+        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/history', query) as List;
+    return (j).map((e) => FileCommit.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<String> fileDiff(
-      String org, String repo, String changeId, String filePath) async {
-    final j = await _get(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/file-diff/${_enc(changeId)}',
-      {'path': filePath},
-    ) as Map<String, dynamic>;
-    return j['diff'] as String? ?? '';
+  Future<String> fileDiff(String org, String repo, String changeId,
+      String filePath) async {
+    final files = await diffChange(org, repo, changeId, filePath);
+    for (final f in files) {
+      if (f.path == filePath) return f.diffText ?? '';
+    }
+    return '';
   }
 
   Future<List<FileCommit>> log(String org, String repo,
-      {String? rev, int? limit}) async {
+      {String? ref, int limit = 30}) async {
     final query = <String, dynamic>{
-      'rev': ?rev,
-      'limit': ?limit,
+      'limit': limit,
+      if (ref != null && ref.isNotEmpty) 'ref': ref,
     };
-    final j = await _get('/api/v1/repos/${_enc(org)}/${_enc(repo)}/log', query)
-        as Map<String, dynamic>;
-    return _list(j, FileCommit.fromJson, 'commits');
+    final j = await _get(
+        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/revisions', query) as List;
+    return j.map((e) => FileCommit.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<List<GitTag>> tags(String org, String repo) async {
-    final j = await _get('/api/v1/repos/${_enc(org)}/${_enc(repo)}/tags')
-        as Map<String, dynamic>;
-    return _list(j, GitTag.fromJson, 'tags');
+    final j = await _get('/api/v1/repo/${_enc(org)}/${_enc(repo)}/tags') as List;
+    return j.map((e) => GitTag.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<List<String>> blame(
-      String org, String repo, String rev, String filePath) async {
-    final j = await _get('/api/v1/git-blame/${_enc(org)}/${_enc(repo)}',
-        {'rev': rev, 'path': filePath}) as Map<String, dynamic>;
-    return ((j['blame'] as List?) ?? []).map((e) => e.toString()).toList();
+  Future<List<String>> blame(String org, String repo, String filePath,
+      [String? ref]) async {
+    final query = <String, dynamic>{
+      'path': filePath,
+      if (ref != null && ref.isNotEmpty) 'ref': ref,
+    };
+    final j = await _get('/api/v1/repo/${_enc(org)}/${_enc(repo)}/blame', query)
+        as List;
+    return j.map((e) {
+      final m = e as Map<String, dynamic>;
+      return m['author'] as String? ?? '';
+    }).toList();
   }
 
   Future<Map<String, dynamic>> mirrors() async =>
-      await _get('/api/v1/repos/mirrors') as Map<String, dynamic>;
+      <String, dynamic>{'mirrors': []};
 
-  // ---- config / providers / models / presets / tools ----
+  // ---- agent settings (proxied through the gateway) ----
 
   Future<Map<String, String>> config() async {
     final j = await _get('/api/v1/config') as Map<String, dynamic>;
-    return j.map((k, v) => MapEntry(k, v.toString()));
+    return (j['providers'] as Map?)?.cast<String, String>() ?? {};
   }
 
   Future<void> setConfig(Map<String, String> entries) =>
-      _put('/api/v1/config', entries);
+      _post('/api/v1/config', entries);
 
   Future<Map<String, ProviderInfo>> providers() async {
     final j = await _get('/api/v1/providers') as Map<String, dynamic>;
-    final m = (j['providers'] as Map?)?.cast<String, dynamic>() ?? {};
-    return m.map((k, v) =>
-        MapEntry(k, ProviderInfo.fromJson(v as Map<String, dynamic>)));
+    final out = <String, ProviderInfo>{};
+    final src = j['providers'] as Map? ?? {};
+    src.forEach((k, v) {
+      if (v is Map<String, dynamic>) out['$k'] = ProviderInfo.fromJson(v);
+    });
+    return out;
   }
 
   Future<void> registerProvider(ProviderInfo p) =>
@@ -437,14 +505,19 @@ class ZergxApi {
       _del('/api/v1/providers/${_enc(pid)}');
 
   Future<Map<String, dynamic>> testProvider(
-          {required String apiType,
-          required String baseUrl,
-          required String apiKey}) async =>
-      await _post('/api/v1/providers/test', {
-        'api_type': apiType,
-        'base_url': baseUrl,
-        'api_key': apiKey,
-      }) as Map<String, dynamic>;
+      {String? providerId,
+      String? model,
+      String? apiType,
+      String? baseUrl,
+      String? apiKey}) async {
+    return await _post('/api/v1/providers/test', {
+      if (providerId != null) 'provider_id': providerId,
+      if (model != null) 'model': model,
+      if (apiType != null) 'api_type': apiType,
+      if (baseUrl != null) 'base_url': baseUrl,
+      if (apiKey != null) 'api_key': apiKey,
+    }) as Map<String, dynamic>;
+  }
 
   Future<List<ModelInfo>> models() async {
     final j = await _get('/api/v1/models') as Map<String, dynamic>;
@@ -469,54 +542,48 @@ class ZergxApi {
       await _get('/api/v1/tool-config') as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> setToolConfig(Map<String, dynamic> cfg) async {
-    final j = await _put('/api/v1/tool-config', cfg) as Map<String, dynamic>;
-    return (j['config'] as Map?)?.cast<String, dynamic>() ?? cfg;
+    return await _post('/api/v1/tool-config', cfg) as Map<String, dynamic>;
   }
 
-  // ---- infra ----
+  // ---- deployments & sandboxes (EasyLab ops surface) ----
 
-  Future<Map<String, dynamic>> k8sConfig() async =>
-      await _get('/api/v1/infra/k8s/config') as Map<String, dynamic>;
-
-  // ---- containers / ops ----
+  Future<Map<String, dynamic>> k8sConfig() async {
+    final j = await _get('/api/v1/ops/namespaces') as Map<String, dynamic>;
+    return j;
+  }
 
   Future<List<Sandbox>> sandboxes() async {
-    final j = await _get('/api/v1/sandboxes') as Map<String, dynamic>;
-    return _list(j, Sandbox.fromJson, 'sandboxes');
+    final j = await _get('/api/v1/ops/services') as List;
+    return j.map((e) => Sandbox.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<List<Deployment>> deployments() async {
-    final j = await _get('/api/v1/deployments') as Map<String, dynamic>;
-    return _list(j, Deployment.fromJson, 'deployments');
+    final j = await _get('/api/v1/ops/services') as List;
+    return j.map((e) => Deployment.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<List<DeploymentPod>> deploymentPods(String name) async {
-    final j = await _get('/api/v1/deployments/${_enc(name)}/pods')
+    final j = await _get('/api/v1/ops/services/${_enc(name)}')
         as Map<String, dynamic>;
-    return _list(j, DeploymentPod.fromJson, 'pods');
+    return _list(j, DeploymentPod.fromJson, 'containers');
   }
 
-  Future<List<DeploymentEvent>> deploymentEvents(String name) async {
-    final j = await _get('/api/v1/deployments/${_enc(name)}/events')
-        as Map<String, dynamic>;
-    return _list(j, DeploymentEvent.fromJson, 'events');
-  }
+  Future<List<DeploymentEvent>> deploymentEvents(String name) async => [];
 
   Future<void> restartDeployment(String name) =>
-      _post('/api/v1/deployments/${_enc(name)}/restart', null);
+      _post('/api/v1/ops/services/${_enc(name)}/scale', {'replicas': 1});
 
   Future<Map<String, dynamic>> deploymentStatus(String name) async =>
-      await _get('/api/v1/deployments/${_enc(name)}/status')
-          as Map<String, dynamic>;
+      await _get('/api/v1/ops/services/${_enc(name)}') as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> deploy(Map<String, dynamic> body) async =>
-      await _post('/api/v1/deployments', body) as Map<String, dynamic>;
+      await _post('/api/v1/ops/services', body) as Map<String, dynamic>;
 
   Future<void> destroySandbox(String session) =>
-      _del('/api/v1/sandboxes/${_enc(session)}');
+      _del('/api/v1/ops/services/${_enc(session)}');
 
   Future<void> destroyDeployment(String name) =>
-      _del('/api/v1/deployments/${_enc(name)}');
+      _del('/api/v1/ops/services/${_enc(name)}');
 
   Future<OpsStatus> status() async {
     final j = await _get('/api/v1/status') as Map<String, dynamic>;
@@ -530,7 +597,7 @@ class ZergxApi {
   }
 
   Future<Map<String, dynamic>> buildImage(Map<String, dynamic> body) async =>
-      await _post('/api/v1/images/build', body) as Map<String, dynamic>;
+      await _post('/api/v1/ops/builds', body) as Map<String, dynamic>;
 
   Future<List<PublishSpec>> publishSpecs() async {
     final j = await _get('/api/v1/publish-specs') as Map<String, dynamic>;
@@ -538,68 +605,65 @@ class ZergxApi {
   }
 
   Future<Map<String, dynamic>> publishPackage(Map<String, dynamic> body) async =>
-      await _post('/api/v1/packages/publish', body) as Map<String, dynamic>;
+      await _post('/api/v1/ops/runs', body) as Map<String, dynamic>;
+
+  // ---- sandboxes: exec / jobs (EasyLab ops sandbox passthrough) ----
 
   Future<List<JobInfo>> jobs(String session) async {
-    final j = await _get('/api/v1/sandboxes/${_enc(session)}/jobs')
-        as Map<String, dynamic>;
-    final jobsMap = j['jobs'];
-    if (jobsMap is Map && jobsMap['jobs'] is List) {
-      return ((jobsMap['jobs']) as List)
-          .map((e) => JobInfo.fromJson(e as Map<String, dynamic>))
-          .toList();
-    }
-    return const [];
+    final j = await _get('/api/v1/ops/tasks') as Map<String, dynamic>;
+    return _list(j, JobInfo.fromJson, 'tasks');
   }
 
   Future<ExecResult> exec(String session, String command) async {
-    final j = await _post('/api/v1/sandboxes/${_enc(session)}/exec', {
+    final j = await _post('/api/v1/ops/sandbox/${_enc(session)}/exec', {
       'command': command,
     }) as Map<String, dynamic>;
     return ExecResult.fromJson(j);
   }
 
-  Future<void> kill(String session, String jobId) =>
-      _post('/api/v1/sandboxes/${_enc(session)}/jobs/${_enc(jobId)}/kill', null);
-
-  Future<Map<String, dynamic>> jobOutput(
-      String session, String jobId, String stream, int start, int end) async {
-    final j = await _get(
-      '/api/v1/sandboxes/${_enc(session)}/jobs/${_enc(jobId)}/output',
-      {'stream': stream, 'start': start, 'end': end},
-    ) as Map<String, dynamic>;
-    return j;
+  Future<void> kill(String session, String jobId) async {
+    await _del('/api/v1/ops/sandbox/${_enc(session)}/jobs/${_enc(jobId)}/kill');
   }
 
-  // ---- packages ----
+  Future<Map<String, dynamic>> jobOutput(
+      String session, String jobId) async {
+    return await _get('/api/v1/ops/tasks/${_enc(jobId)}')
+        as Map<String, dynamic>;
+  }
+
+  // ---- packages (EasyLab registry) ----
 
   Future<List<PackageTypeEntry>> listPackageTypes() async {
     final j = await _get('/api/v1/packages') as Map<String, dynamic>;
-    return _list(j, PackageTypeEntry.fromJson, 'types');
+    return _list(j, PackageTypeEntry.fromJson, 'packages');
   }
 
   Future<Map<String, dynamic>> listAllPackages(
-      {String? type, String? q, int? limit, int? offset}) async {
+      {String? type,
+      String? q,
+      int page = 1,
+      int pageSize = 50,
+      int limit = 50,
+      int offset = 0}) async {
     final query = <String, dynamic>{
+      'page': page,
+      'page_size': pageSize,
+      'limit': limit,
+      'offset': offset,
       if (type != null && type.isNotEmpty) 'type': type,
       if (q != null && q.isNotEmpty) 'q': q,
-      'limit': ?limit,
-      'offset': ?offset,
     };
     return await _get('/api/v1/packages/list', query) as Map<String, dynamic>;
   }
 
   Future<PackageInfo2> packageVersions(String type, String name) async {
-    final j = await _get(
-            '/api/v1/packages/${_enc(type)}/${_enc(name)}/versions')
+    final j = await _get('/api/v1/packages/${_enc(type)}/${_enc(name)}')
         as Map<String, dynamic>;
-    final data = (j['data'] as Map?)?.cast<String, dynamic>() ?? {};
     return PackageInfo2(
-      name: data['name'] as String? ?? name,
-      type: data['type'] as String? ?? type,
-      versions: ((data['versions'] as List?) ?? [])
-          .map((e) => PackageVersion.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      name: name,
+      type: type,
+      versions:
+          _list(j, PackageVersion.fromJson, 'versions'),
     );
   }
 
