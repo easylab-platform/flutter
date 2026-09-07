@@ -1,4 +1,4 @@
-package dev.zergx.zergx_flutter
+package dev.easy.lab
 
 import io.flutter.embedding.android.FlutterActivity
 
