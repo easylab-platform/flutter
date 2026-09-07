@@ -132,7 +132,7 @@ class _CodeScreenState extends State<CodeScreen> {
                       ],
                     ),
                   ),
-                  for (final bm in repo.bookmarks)
+                  for (final bm in repo.branches)
                     ListTile(
                       selected: store.codeOrg == org.org &&
                           store.codeRepo == repo.repo &&
@@ -423,7 +423,7 @@ class _CodeScreenState extends State<CodeScreen> {
 
 /// Full-diff viewer for a single repository commit (Code tab commits list).
 class _CommitDiffPage extends StatefulWidget {
-  final ZergxApi api;
+  final EasyLabClient api;
   final String org;
   final String repo;
   final FileCommit commit;

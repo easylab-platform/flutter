@@ -20,7 +20,7 @@ class ChatSidebar extends StatefulWidget {
   State<ChatSidebar> createState() => _ChatSidebarState();
 }
 
-/// Indent ladder for the repo tree: org=16, repo=32, bookmark=48.
+/// Indent ladder for the repo tree: org=16, repo=32, branch=48.
 const _treeIndent = <double>[16, 32, 48];
 
 class _ChatSidebarState extends State<ChatSidebar> {
@@ -67,7 +67,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
     return s;
   }
 
-  Future<void> _openBookmark(
+  Future<void> _openBranch(
       String org, String repo, String branch, String? sessionId) async {
     if (sessionId != null) {
       store.pickSession(sessionId);
@@ -182,7 +182,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
     if (ok != true) return;
     try {
       if (s.org.isNotEmpty) {
-        await store.deleteBookmark(s.org, s.repo, s.branch);
+        await store.deleteBranch(s.org, s.repo, s.branch);
       } else {
         await store.deleteSession(s.id);
       }
@@ -249,7 +249,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
             },
           ),
         ),
-        for (final bm in repo.bookmarks)
+        for (final bm in repo.branches)
           ListTile(
             contentPadding: EdgeInsets.only(
                 left: AppSpacing.md + _treeIndent[2], right: AppSpacing.sm),
@@ -273,7 +273,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
                     onPressed: () => _forkDialog(bm.session!.sessionId),
                   )
                 : null,
-            onTap: () => _openBookmark(
+            onTap: () => _openBranch(
                 org.org, repo.repo, bm.branch, bm.session?.sessionId),
           ),
       ],
@@ -305,7 +305,7 @@ class _ChatSidebarState extends State<ChatSidebar> {
     );
     if (r != null && r.trim().isNotEmpty) {
       final branch = r.trim();
-      if (store.existingBookmarks.contains(branch)) {
+      if (store.existingBranches.contains(branch)) {
         if (!mounted) return;
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(t(context, 'branchExists'))));

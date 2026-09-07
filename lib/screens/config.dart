@@ -231,7 +231,7 @@ class _SectionHeader extends StatelessWidget {
 class _ProvidersDetail extends StatefulWidget {
   final Map<String, ProviderInfo> providers;
   final VoidCallback onChanged;
-  final ZergxApi api;
+  final EasyLabClient api;
   const _ProvidersDetail(
       {required this.providers, required this.onChanged, required this.api});
 
@@ -312,7 +312,7 @@ class _ProvidersDetailState extends State<_ProvidersDetail> {
 }
 
 class _AddProviderForm extends StatefulWidget {
-  final ZergxApi api;
+  final EasyLabClient api;
   final VoidCallback onRegistered;
   final VoidCallback onCancel;
   const _AddProviderForm(
@@ -468,7 +468,7 @@ class _AddProviderFormState extends State<_AddProviderForm> {
 }
 
 class _PresetsDetail extends StatefulWidget {
-  final ZergxApi api;
+  final EasyLabClient api;
   const _PresetsDetail({required this.api});
 
   @override
@@ -700,7 +700,7 @@ class _PresetsDetailState extends State<_PresetsDetail> {
 }
 
 class _ToolsDetail extends StatefulWidget {
-  final ZergxApi api;
+  final EasyLabClient api;
   final Map<String, ProviderInfo> providers;
   const _ToolsDetail({required this.api, required this.providers});
 

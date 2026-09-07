@@ -158,11 +158,11 @@ class SessionInfo {
 
 // ---- repo tree ----
 
-class BookmarkNode {
+class BranchNode {
   final String branch;
   final SessionInfo? session;
-  BookmarkNode({required this.branch, this.session});
-  factory BookmarkNode.fromJson(Map<String, dynamic> j) => BookmarkNode(
+  BranchNode({required this.branch, this.session});
+  factory BranchNode.fromJson(Map<String, dynamic> j) => BranchNode(
         branch: j['branch'] as String? ?? '',
         session: j['session'] == null
             ? null
@@ -172,12 +172,12 @@ class BookmarkNode {
 
 class RepoNode {
   final String repo;
-  final List<BookmarkNode> bookmarks;
-  RepoNode({required this.repo, required this.bookmarks});
+  final List<BranchNode> branches;
+  RepoNode({required this.repo, required this.branches});
   factory RepoNode.fromJson(Map<String, dynamic> j) => RepoNode(
         repo: j['repo'] as String? ?? '',
-        bookmarks: (j['bookmarks'] as List? ?? [])
-            .map((e) => BookmarkNode.fromJson(e as Map<String, dynamic>))
+        branches: (j['branches'] as List? ?? [])
+            .map((e) => BranchNode.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }

@@ -9,8 +9,8 @@ import '../widgets/chat_avatar.dart';
 import '../widgets/session_row.dart';
 
 /// Full-screen session search (WeChat-style). Filters the loaded session
-/// list by org / repo / bookmark substring, and searches the org/repo tree
-/// so tapping an unbound bookmark opens/adopts it.
+/// list by org / repo / branch substring, and searches the org/repo tree
+/// so tapping an unbound branch opens/adopts it.
 class SessionSearchPage extends StatefulWidget {
   final AppStore store;
   const SessionSearchPage({super.key, required this.store});
@@ -115,7 +115,7 @@ class _SessionSearchPageState extends State<SessionSearchPage> {
     );
   }
 
-  /// Empty-query view: browse the org/repo tree for searchable bookmarks.
+  /// Empty-query view: browse the org/repo tree for searchable branches.
   Widget _treeResults(BuildContext context) {
     final colors = colorsOf(context);
     final text = textOf(context);
@@ -129,7 +129,7 @@ class _SessionSearchPageState extends State<SessionSearchPage> {
         _Header(t(context, 'allRepos')),
         for (final org in store.orgs)
           for (final repo in org.repos)
-            for (final bm in repo.bookmarks)
+            for (final bm in repo.branches)
               ListTile(
                 leading:
                     ChatAvatar(org: org.org, repo: repo.repo, branch: bm.branch, radius: 16),

@@ -353,7 +353,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (ok == true) {
       try {
         if (s != null && s.org.isNotEmpty) {
-          await store.deleteBookmark(s.org, s.repo, s.branch);
+          await store.deleteBranch(s.org, s.repo, s.branch);
         } else {
           await store.deleteSession(sid);
         }

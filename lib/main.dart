@@ -19,17 +19,17 @@ import 'screens/packages.dart';
 const defaultBaseUrl = '';
 
 void main() {
-  runApp(const ZergxApp());
+  runApp(const EasyLabApp());
 }
 
-class ZergxApp extends StatefulWidget {
-  const ZergxApp({super.key});
+class EasyLabApp extends StatefulWidget {
+  const EasyLabApp({super.key});
 
   @override
-  State<ZergxApp> createState() => _ZergxAppState();
+  State<EasyLabApp> createState() => _EasyLabAppState();
 }
 
-class _ZergxAppState extends State<ZergxApp> {
+class _EasyLabAppState extends State<EasyLabApp> {
   String? _baseUrl;
   String? _token;
   bool _dark = true;
@@ -133,7 +133,7 @@ class _ZergxAppState extends State<ZergxApp> {
   }
 
   Future<AppStore> _buildStore() async {
-    final api = await ZergxApi.create(baseUrl: _baseUrl!, token: _token!);
+    final api = await EasyLabClient.create(baseUrl: _baseUrl!, token: _token!);
     if (mounted) _store = AppStore(api);
     return _store!;
   }
@@ -415,7 +415,7 @@ class _SetupScreenState extends State<_SetupScreen> {
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final api = await ZergxApi.create(baseUrl: base, token: token);
+      final api = await EasyLabClient.create(baseUrl: base, token: token);
       await api.listSessions();
       if (!mounted) return;
       await widget.onSave(base, token);

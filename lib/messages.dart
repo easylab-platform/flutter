@@ -11,7 +11,7 @@ import 'models.dart';
 class MessagesController extends ChangeNotifier {
   MessagesController({required this.api, required this.getSessionId});
 
-  final ZergxApi api;
+  final EasyLabClient api;
   final String Function() getSessionId;
 
   List<ChatMessage> messages = [];

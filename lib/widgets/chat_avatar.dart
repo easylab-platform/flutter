@@ -12,7 +12,7 @@ import 'package:flutter/material.dart';
 ///                         → same org + different repo: same底色, different
 ///                           pattern color
 ///   - pattern geometry  = bits from hash(org/repo/BRANCH) → same repo +
-///                         different bookmark: same配色, different图案
+///                         different branch: same配色, different图案
 ///
 /// The geometry is the classic identicon recipe: a 5x5 grid where the left
 /// 3 columns come from hash bits and the right 2 mirror them, giving

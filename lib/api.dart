@@ -25,19 +25,19 @@ class TaskLogLine {
 /// the Lab core (/api/v1/repo...), the ops surface (/api/v1/ops...), the
 /// embedded agent session backend (/api/v1/sessions..., proxied) and the
 /// package registry (/v2, /api/v1/packages).
-class ZergxApi {
+class EasyLabClient {
   final String baseUrl;
   final String token;
   final http.Client client;
 
-  ZergxApi({required this.baseUrl, required this.token})
+  EasyLabClient({required this.baseUrl, required this.token})
       : client = http.Client();
-  ZergxApi.withClient(
+  EasyLabClient.withClient(
       {required this.baseUrl, required this.token, required this.client});
 
-  static Future<ZergxApi> create(
+  static Future<EasyLabClient> create(
       {required String baseUrl, required String token}) async {
-    return ZergxApi.withClient(
+    return EasyLabClient.withClient(
         baseUrl: baseUrl, token: token, client: await platformHttpClient());
   }
 
@@ -327,7 +327,7 @@ class ZergxApi {
       final repo = m['name'] as String? ?? '';
       byOrg.putIfAbsent(org, () => []).add(RepoNode(
             repo: repo,
-            bookmarks: [],
+            branches: [],
           ));
     }
     return byOrg.entries.map((e) => OrgNode(org: e.key, repos: e.value)).toList();
@@ -355,15 +355,15 @@ class ZergxApi {
     return utf8.decode(base64Decode(j['content'] as String? ?? ''));
   }
 
-  Future<String> adoptSession(String org, String repo, String bookmark) async {
+  Future<String> adoptSession(String org, String repo, String branch) async {
     // The agent backend keys sessions by name; adopting a repo/branch creates
     // (or returns) the canonical session for that workspace.
-    final name = '$org-$repo-${bookmark.isEmpty ? 'main' : bookmark}';
+    final name = '$org-$repo-${branch.isEmpty ? 'main' : branch}';
     final j = await _post('/api/v1/sessions', {
       'name': name,
       'org': org,
       'repo': repo,
-      'branch': bookmark.isEmpty ? 'main' : bookmark,
+      'branch': branch.isEmpty ? 'main' : branch,
     }) as Map<String, dynamic>;
     return j['session_name'] as String? ?? name;
   }
@@ -391,8 +391,8 @@ class ZergxApi {
     });
   }
 
-  Future<void> deleteBookmark(String org, String repo, String bookmark) =>
-      _del('/api/v1/repo/${_enc(org)}/${_enc(repo)}/branches/${_enc(bookmark)}');
+  Future<void> deleteBranch(String org, String repo, String branch) =>
+      _del('/api/v1/repo/${_enc(org)}/${_enc(repo)}/branches/${_enc(branch)}');
 
   Future<void> deleteRepo(String org, String repo) =>
       _del('/api/v1/repo/${_enc(org)}/${_enc(repo)}');

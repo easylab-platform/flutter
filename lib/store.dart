@@ -11,7 +11,7 @@ enum SessionOverlay { timeline, files, mailbox, container, todos }
 class AppStore extends ChangeNotifier {
   AppStore(this.api);
 
-  final ZergxApi api;
+  final EasyLabClient api;
 
   SiderTab siderTab = SiderTab.chat;
   List<Session> sessions = [];
@@ -105,7 +105,7 @@ class AppStore extends ChangeNotifier {
             .where((o) => o.org == org)
             .expand((o) => o.repos)
             .where((r) => r.repo == repo)
-            .expand((r) => r.bookmarks)
+            .expand((r) => r.branches)
             .map((b) => b.branch)
             .toList();
     for (final pref in ['main', 'master', 'dev']) {
@@ -224,7 +224,7 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<String> get existingBookmarks =>
+  List<String> get existingBranches =>
       sessions.map((s) => s.branch).toList();
 
   Future<void> deleteSession(String id) async {
@@ -233,8 +233,8 @@ class AppStore extends ChangeNotifier {
     await refreshSessions();
   }
 
-  Future<void> deleteBookmark(String org, String repo, String bm) async {
-    await api.deleteBookmark(org, repo, bm);
+  Future<void> deleteBranch(String org, String repo, String bm) async {
+    await api.deleteBranch(org, repo, bm);
     await refreshSessions();
   }
 
