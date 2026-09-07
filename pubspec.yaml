@@ -19,7 +19,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 0.1.0+1
 
 environment:
-  sdk: ^3.13.2
+  sdk: ^3.7.0
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -37,6 +37,10 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   http: ^1.6.0
+  connectrpc: ^2.0.0
+  protobuf: ^6.0.0
+  fixnum: ^1.1.1
+  http2: ^2.3.0
   shared_preferences: ^2.5.5
   flutter_markdown_plus: ^1.0.0
   collection: ^1.19.1

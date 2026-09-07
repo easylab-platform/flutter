@@ -2,6 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart' as $wkt;
+
+import 'package:connectrpc/connect.dart' as connect;
+import 'package:connectrpc/http2.dart';
+import 'package:connectrpc/protobuf.dart';
+import 'package:connectrpc/protocol/connect.dart' as protocol;
+
+import 'gen/agent/v1/agent.pb.dart' as agent_pb;
+import 'gen/agent/v1/agent.connect.client.dart' as agent_client;
+import 'gen/easylab/v1/easylab.pb.dart' as lab_pb;
+import 'gen/easylab/v1/easylab.connect.client.dart' as lab_client;
 
 import 'models.dart';
 import 'net/http_client_factory.dart';
@@ -21,188 +32,661 @@ class TaskLogLine {
   TaskLogLine(this.stream, this.line);
 }
 
-/// Thin client over the EasyLab gateway (easylab :8080), which fans out to
-/// the Lab core (/api/v1/repo...), the ops surface (/api/v1/ops...), the
-/// embedded agent session backend (/api/v1/sessions..., proxied) and the
-/// package registry (/v2, /api/v1/packages).
+/// Connect-backed typed client for EasyLab.
+///
+/// Replaces the loose HTTP/JSON client with strong-typed RPC (buf + Connect).
+/// The Agent surface uses `agent.v1.AgentService`; the Lab/Ops/Registry
+/// surfaces use `easylab.v1.*`. Streaming (SSE) endpoints are preserved as the
+/// servers keep them for live turn/broadcast.
 class EasyLabClient {
   final String baseUrl;
   final String token;
-  final http.Client client;
+
+  final agent_client.AgentServiceClient _agent;
+  final lab_client.LabServiceClient _lab;
+  final lab_client.OpsServiceClient _ops;
+  final lab_client.RegistryServiceClient _registry;
+
+  late final http.Client http;
 
   EasyLabClient({required this.baseUrl, required this.token})
-      : client = http.Client();
-  EasyLabClient.withClient(
-      {required this.baseUrl, required this.token, required this.client});
+      : _agent = agent_client.AgentServiceClient(_build(baseUrl, token)),
+        _lab = lab_client.LabServiceClient(_build(baseUrl, token)),
+        _ops = lab_client.OpsServiceClient(_build(baseUrl, token)),
+        _registry = lab_client.RegistryServiceClient(_build(baseUrl, token)) {
+    http = http.Client();
+  }
+
+  static connect.Transport _build(String baseUrl, String token) {
+    final trimmed = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    final bindings = protocol.Transport(
+      baseUrl: trimmed,
+      codec: const ProtoCodec(),
+      httpClient: createHttpClient(),
+    );
+    return bindings;
+  }
 
   static Future<EasyLabClient> create(
       {required String baseUrl, required String token}) async {
-    return EasyLabClient.withClient(
-        baseUrl: baseUrl, token: token, client: await platformHttpClient());
+    // Warm up the custom CA client (kept for the SSE paths below).
+    final _ = await platformHttpClient();
+    return EasyLabClient(baseUrl: baseUrl, token: token);
   }
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-      };
-
-  Uri _u(String path, [Map<String, dynamic>? query]) {
-    final parsed = Uri.parse('$baseUrl$path');
-    if (query == null || query.isEmpty) return parsed;
-    final orig = parsed.queryParameters;
-    final merged = <String, String>{...orig};
-    query.forEach((k, v) {
-      if (v != null) merged[k] = '$v';
-    });
-    return parsed.replace(queryParameters: merged);
+  String get _authHeader {
+    return token.isNotEmpty ? 'Bearer $token' : '';
   }
 
-  String _enc(String s) => Uri.encodeComponent(s);
-
-  dynamic _decode(http.Response r) {
-    if (r.statusCode >= 400) throw ApiException(r.statusCode, r.body);
-    if (r.body.isEmpty) return const <String, dynamic>{};
-    return jsonDecode(r.body);
-  }
-
-  Future<dynamic> _get(String path, [Map<String, dynamic>? query]) async {
-    final r = await client.get(_u(path, query), headers: _headers);
-    return _decode(r);
-  }
-
-  Future<dynamic> _post(String path, [Object? body]) async {
-    final r = await client.post(
-      _u(path),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(r);
-  }
-
-  Future<dynamic> _patch(String path, Object? body) async {
-    final r = await client.patch(
-      _u(path),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(r);
-  }
-
-  Future<dynamic> _del(String path) async {
-    final r = await client.delete(_u(path), headers: _headers);
-    return _decode(r);
-  }
-
-  List<T> _list<T>(dynamic j, T Function(Map<String, dynamic>) f,
-      [String key = '']) {
-    final src = key.isEmpty ? j : j[key];
-    return ((src as List?) ?? [])
-        .map((e) => f(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  // ---- sessions (agent backend, proxied through the gateway) ----
+  // ---- agent: sessions ----
 
   Future<List<Session>> listSessions() async {
-    final j = await _get('/api/v1/sessions') as Map<String, dynamic>;
-    return _list(j, Session.fromJson, 'sessions');
+    final r = await _agent.listSessions(agent_pb.ListSessionsRequest());
+    return r.sessions.map(sessionFromPb).toList();
   }
 
   Future<Session> createSession(Map<String, dynamic> params) async {
-    final j = await _post('/api/v1/sessions', params) as Map<String, dynamic>;
-    final name = j['session_name'] as String? ?? '';
-    if (name.isEmpty) return Session.fromJson(j);
-    final got = await _get('/api/v1/sessions/${_enc(name)}');
-    return Session.fromJson((got as Map<String, dynamic>)['session']
-        as Map<String, dynamic>);
+    final r = await _agent.createSession(agent_pb.CreateSessionRequest(
+      name: params['name'] as String? ?? '',
+      model: params['model'] as String? ?? '',
+      preset: params['preset'] as String? ?? '',
+    ));
+    return Session(id: r.sessionName, model: params['model'] as String? ?? '');
   }
 
   Future<Session> getSession(String id) async {
-    final j = await _get('/api/v1/sessions/${_enc(id)}') as Map<String, dynamic>;
-    return Session.fromJson(j['session'] as Map<String, dynamic>);
+    final r = await _agent.getSession(agent_pb.GetSessionRequest(id: id));
+    return sessionFromPb(r.session);
   }
 
-  Future<void> deleteSession(String id) => _del('/api/v1/sessions/${_enc(id)}');
+  Future<void> deleteSession(String id) async {
+    await _agent.deleteSession(agent_pb.DeleteSessionRequest(id: id));
+  }
 
   Future<String> prompt(String id, String prompt) async {
-    await _post('/api/v1/sessions/${_enc(id)}/prompt', {'prompt': prompt});
+    // Server-streaming prompt; drain until accepted. The turn continues in the
+    // background; streamed deltas come over the SSE /stream endpoint.
+    await for (final e in _agent.prompt(
+        agent_pb.PromptRequest(id: id, prompt: prompt))) {
+      if (e.event == 'accepted') return e.params['message_id'] ?? '';
+    }
     return '';
   }
 
   Future<(List<Message>, bool)> messages(String id,
-      {String? before, int limit = 30}) async {
-    final query = <String, dynamic>{'limit': limit};
-    if (before != null) query['before'] = before;
-    final j = await _get('/api/v1/sessions/${_enc(id)}/messages', query)
-        as Map<String, dynamic>;
-    final msgs = _list(j, Message.fromJson, 'messages');
-    return (msgs, msgs.length >= limit);
+      {int limit = 50, String? before}) async {
+    final r = await _agent.listMessages(agent_pb.ListMessagesRequest(
+        id: id, limit: limit, before: before ?? ''));
+    final list =
+        r.messages.map(messageFromPb).toList(growable: false);
+    return (list, false);
   }
 
-  Future<String> switchModel(String id, String model) async {
-    final j =
-        await _post('/api/v1/sessions/${_enc(id)}/model', {'model': model})
-        as Map<String, dynamic>;
-    return j['model'] as String? ?? model;
+  Future<Session> switchModel(String id, String model) async {
+    final r = await _agent.setModel(agent_pb.SetModelRequest(id: id, model: model));
+    return sessionFromPb(r.session);
   }
 
   Future<Session> settings(String id, Map<String, dynamic> settings) async {
-    final body = Map<String, dynamic>.from(settings);
-    body.removeWhere((_, v) => v == null);
-    final j = await _patch('/api/v1/sessions/${_enc(id)}/settings', body)
-        as Map<String, dynamic>;
-    return Session.fromJson(
-        (j['session'] as Map<String, dynamic>?) ?? j);
+    final r = await _agent.updateSettings(agent_pb.UpdateSettingsRequest(
+      id: id,
+      model: settings['model'] as String? ?? '',
+      preset: settings['preset'] as String? ?? '',
+      maxTurns: settings['max_turns'] as int? ?? 0,
+      systemPrompt: settings['system_prompt'] as String? ?? '',
+      locale: settings['locale'] as String? ?? '',
+    ));
+    return sessionFromPb(r.session);
   }
 
   Future<Session> fork(String id, String branch) async {
-    final j = await _post('/api/v1/sessions/${_enc(id)}/fork', {'branch': branch})
-        as Map<String, dynamic>;
-    return Session.fromJson(
-        (j['session'] as Map<String, dynamic>?) ?? j);
+    final r = await _agent.fork(agent_pb.ForkRequest(id: id, name: branch));
+    return sessionFromPb(r.session);
   }
 
-  Future<void> revert(String id, String? messageId) =>
-      _post('/api/v1/sessions/${_enc(id)}/undo', {'message_id': messageId});
+  Future<void> revert(String id, String? messageId) async {
+    await _agent.undo(agent_pb.UndoRequest(id: id, messageId: messageId ?? ''));
+  }
 
   Future<bool> interrupt(String id) async {
-    final j = await _post('/api/v1/sessions/${_enc(id)}/interrupt', null)
-        as Map<String, dynamic>;
-    return j['ok'] == true || j['interrupted'] == true;
+    final r = await _agent.interrupt(agent_pb.InterruptRequest(id: id));
+    return r.interrupted;
   }
 
   Future<bool> compact(String id) async {
-    final j = await _post('/api/v1/sessions/${_enc(id)}/compact', null);
-    return j is Map ? j['ok'] == true : true;
+    final r = await _agent.compact(agent_pb.CompactRequest(id: id));
+    return r.ok;
   }
 
-  Future<void> markRead(String id) =>
-      _post('/api/v1/sessions/${_enc(id)}/read', null);
+  Future<void> markRead(String id) async {
+    await _agent.state(agent_pb.StateRequest(id: id));
+  }
 
   Future<(String, List<dynamic>)> state(String id) async {
-    final j = await _get('/api/v1/sessions/${_enc(id)}/state') as Map<String, dynamic>;
-    return (j['status'] as String? ?? 'idle', (j['parts'] as List?) ?? []);
+    final r = await _agent.state(agent_pb.StateRequest(id: id));
+    final status = (r.state.fields['status']?.stringValue ?? 'idle');
+    return (status, []);
   }
 
   Future<List<MailboxEntry>> mailbox(String id) async {
-    final j = await _get('/api/v1/sessions/${_enc(id)}/mailbox') as Map<String, dynamic>;
-    return _list(j, MailboxEntry.fromJson, 'entries');
+    final r = await _agent.mailbox(agent_pb.MailboxRequest(id: id));
+    return r.mailbox
+        .map((m) => MailboxEntry(
+              id: m.id,
+              msgType: m.msgType,
+              payload: m.payload,
+              effectiveAt: m.effectiveAt.isEmpty ? null : m.effectiveAt,
+              status: m.status,
+              createdAt: m.createdAt,
+              consumedAt: m.consumedAt.isEmpty ? null : m.consumedAt,
+            ))
+        .toList();
   }
 
-  // The agent backend has no changes/todos surfaces; keep the UI contract.
   Future<List<ChangeEntry>> changes(String id) async => [];
   Future<List<Todo>> todos(String id) async => [];
 
-  // ---- stream (SSE) ----
+  // ---- agent: providers / models / presets / config (moved to Connect) ----
+
+  Future<Map<String, ProviderInfo>> providers() async {
+    final r = await _agent.listProviders(agent_pb.ListProvidersRequest());
+    final out = <String, ProviderInfo>{};
+    for (final p in r.providers) {
+      out[p.providerId] = ProviderInfo(
+        providerId: p.providerId,
+        apiType: p.apiType,
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        headers: p.headers,
+        models: p.models
+            .map((id) => ProviderModel(id: id, name: id))
+            .toList(),
+      );
+    }
+    return out;
+  }
+
+  Future<void> registerProvider(ProviderInfo p) async {
+    await _agent.registerProvider(agent_pb.RegisterProviderRequest(
+        provider: agent_pb.Provider(
+      providerId: p.providerId,
+      apiType: p.apiType,
+      baseUrl: p.baseUrl,
+      apiKey: p.apiKey,
+      headers: (p.headers ?? {}).entries.map((e) => MapEntry(e.key, e.value)),
+      models: p.models.map((m) => m.id).toList(),
+    )));
+  }
+
+  Future<void> deleteProvider(String pid) async {
+    await _agent.deleteProvider(
+        agent_pb.DeleteProviderRequest(providerId: pid));
+  }
+
+  Future<Map<String, dynamic>> testProvider(
+      {String? providerId,
+      String? model,
+      String? apiType,
+      String? baseUrl,
+      String? apiKey}) async {
+    final r = await _agent.testProvider(agent_pb.TestProviderRequest(
+      providerId: providerId ?? '',
+      model: model ?? '',
+      apiType: apiType ?? '',
+      baseUrl: baseUrl ?? '',
+      apiKey: apiKey ?? '',
+    ));
+    return {'ok': r.ok, 'result': r.result};
+  }
+
+  Future<List<ModelInfo>> models() async {
+    final r = await _agent.listModels(agent_pb.ListModelsRequest());
+    return r.models
+        .map((m) => ModelInfo(id: m.id, name: m.name))
+        .toList();
+  }
+
+  Future<List<Preset>> presets() async {
+    final r = await _agent.listPresets(agent_pb.ListPresetsRequest());
+    return r.presets
+        .map((p) => Preset(
+              id: p.id,
+              systemPrompt: p.systemPrompt,
+              tools: p.tools,
+              maxTurns: p.maxTurns,
+            ))
+        .toList();
+  }
+
+  Future<void> savePreset(Preset p) async {
+    await _agent.upsertPreset(agent_pb.UpsertPresetRequest(
+        preset: agent_pb.Preset(
+      id: p.id,
+      systemPrompt: p.systemPrompt,
+      tools: p.tools,
+      maxTurns: p.maxTurns,
+    )));
+  }
+
+  Future<void> deletePreset(String id) async {
+    await _agent.deletePreset(agent_pb.DeletePresetRequest(id: id));
+  }
+
+  Future<List<ToolInfo>> tools() async {
+    final r = await _agent.listTools(agent_pb.ListToolsRequest());
+    return r.tools
+        .map((t) => ToolInfo(
+              name: t.name,
+              description: t.description,
+              category: t.category,
+              parameters: (t.parameters as Map<String, dynamic>?)?.cast<String, dynamic>(),
+              configFields: t.configFields
+                  .map((c) => ToolConfigField(
+                      key: c.name,
+                      label: c.description.isEmpty ? c.name : c.description,
+                      type: c.type,
+                    ))
+                  .toList(),
+            ))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> toolConfig() async {
+    final r = await _agent.getToolConfig(agent_pb.GetToolConfigRequest());
+    return _structToMap(r.config?.values ?? {});
+  }
+
+  Future<Map<String, dynamic>> setToolConfig(Map<String, dynamic> cfg) async {
+    final r = await _agent.setToolConfig(
+        agent_pb.SetToolConfigRequest(config: _mapToStruct(cfg)));
+    return r.ok ? cfg : {};
+  }
+
+  Future<Map<String, String>> config() async {
+    return {};
+  }
+
+  Future<void> setConfig(Map<String, String> entries) async {
+    for (final e in entries.entries) {
+      await _agent.setConfig(
+          agent_pb.SetConfigRequest(key: e.key, value: e.value));
+    }
+  }
+
+  // ---- lab: repositories / filesystem ----
+
+  Future<List<OrgNode>> repos() async {
+    final r = await _lab.listRepos(lab_pb.ListReposRequest());
+    final byOrg = <String, List<RepoNode>>{};
+    for (final repo in r.repos) {
+      byOrg.putIfAbsent(repo.namespace, () => []).add(RepoNode(
+            repo: repo.name,
+            branches: [],
+          ));
+    }
+    return byOrg.entries
+        .map((e) => OrgNode(org: e.key, repos: e.value))
+        .toList();
+  }
+
+  Future<List<FileEntry>> listFiles(String org, String repo, String dir,
+      [String? ref]) async {
+    final r = await _lab.tree(lab_pb.TreeRequest(
+        org: org, repo: repo, path: dir, ref: ref ?? ''));
+    return r.entries
+        .map((e) => FileEntry(
+            name: e.name,
+            path: e.path,
+            isDir: e.kind == 'dir',
+            size: e.size))
+        .toList();
+  }
+
+  Future<String> readFile(String org, String repo, String filePath,
+      [String? ref]) async {
+    final r = await _lab.readBlob(lab_pb.ReadBlobRequest(
+        org: org, repo: repo, path: filePath, ref: ref ?? ''));
+    return utf8.decode(r.raw);
+  }
+
+  Future<String> adoptSession(String org, String repo, String branch) async {
+    final name = '$org-$repo-${branch.isEmpty ? 'main' : branch}';
+    final r = await _agent.createSession(agent_pb.CreateSessionRequest(
+      name: name,
+      org: org,
+      repo: repo,
+      branch: branch.isEmpty ? 'main' : branch,
+    ));
+    return r.sessionName;
+  }
+
+  Future<void> ensureOrg(String org) async {
+    await _lab.ensureOrg(lab_pb.EnsureOrgRequest(org: org));
+  }
+
+  Future<void> ensureRepo(String org, String repo) async {
+    await _lab.ensureRepo(lab_pb.EnsureRepoRequest(org: org, repo: repo));
+  }
+
+  Future<void> cloneRepo(String org, String repo, String gitUrl,
+      [String? token, String? rev]) async {
+    await ensureRepo(org, repo);
+    final r = await _lab.cloneRepo(lab_pb.CloneRepoRequest(
+        org: org, repo: repo, gitUrl: gitUrl, rev: rev ?? ''));
+    if (!r.ok) {
+      throw ApiException(500, r.error);
+    }
+  }
+
+  Future<void> deleteBranch(String org, String repo, String branch) async {
+    await _lab.deleteBranch(
+        lab_pb.DeleteBranchRequest(org: org, repo: repo, branch: branch));
+  }
+
+  Future<void> deleteRepo(String org, String repo) async {
+    await _lab.deleteRepo(lab_pb.DeleteRepoRequest(org: org, repo: repo));
+  }
+
+  Future<void> deleteOrg(String org) async {
+    final nodes = await repos();
+    final node = nodes.where((n) => n.org == org).firstOrNull;
+    if (node == null) return;
+    for (final r in node.repos) {
+      await deleteRepo(org, r.repo);
+    }
+  }
+
+  Future<List<DiffFile>> diffChange(String org, String repo, String changeId,
+      [String? path]) async {
+    final r = await _lab.diff(lab_pb.DiffRequest(
+        org: org, repo: repo, changeId: changeId, path: path ?? ''));
+    return r.files
+        .map((f) => DiffFile(path: f.path, diffText: f.diff))
+        .toList();
+  }
+
+  Future<String> fileAtChange(String org, String repo, String changeId,
+      String filePath) async {
+    final r = await _lab.readBlob(lab_pb.ReadBlobRequest(
+        org: org, repo: repo, path: filePath, ref: changeId));
+    return utf8.decode(r.raw);
+  }
+
+  Future<List<FileCommit>> fileLog(String org, String repo, String filePath,
+      [String? ref]) async {
+    final r = await _lab.fileHistory(lab_pb.FileHistoryRequest(
+        org: org, repo: repo, path: filePath, ref: ref ?? ''));
+    return r.commits.map(commitFromPb).toList();
+  }
+
+  Future<String> fileDiff(String org, String repo, String changeId,
+      String filePath) async {
+    final files = await diffChange(org, repo, changeId, filePath);
+    for (final f in files) {
+      if (f.path == filePath) return f.diffText ?? '';
+    }
+    return '';
+  }
+
+  Future<List<FileCommit>> log(String org, String repo,
+      {String? ref, int limit = 30}) async {
+    final r = await _lab.log(lab_pb.LogRequest(
+        org: org, repo: repo, ref: ref ?? '', limit: limit));
+    return r.commits.map(commitFromPb).toList();
+  }
+
+  Future<List<GitTag>> tags(String org, String repo) async {
+    final r = await _lab.tags(lab_pb.TagsRequest(org: org, repo: repo));
+    return r.tags.map((t) => GitTag(name: t.name, target: t.target)).toList();
+  }
+
+  Future<List<String>> blame(String org, String repo, String filePath,
+      [String? ref]) async {
+    final r = await _lab.blame(lab_pb.BlameRequest(
+        org: org, repo: repo, path: filePath, ref: ref ?? ''));
+    return r.lines;
+  }
+
+  Future<Map<String, dynamic>> mirrors() async => {};
+
+  // ---- ops: services / sandboxes / jobs ----
+
+  Future<Map<String, dynamic>> k8sConfig() async {
+    final r = await _ops.listNamespaces(lab_pb.ListNamespacesRequest());
+    return {'namespaces': r.namespaces.map((n) => n.name).toList()};
+  }
+
+  Future<List<Sandbox>> sandboxes() async {
+    final r = await _ops.listServices(lab_pb.ListServicesRequest());
+    return r.services
+        .map((s) => Sandbox(
+              containerId: s.name,
+              session: s.session,
+              podName: s.name,
+              status: s.status,
+              workerUrl: s.url,
+              podIp: '',
+              syncedRev: '',
+            ))
+        .toList();
+  }
+
+  Future<List<Deployment>> deployments() async {
+    final r = await _ops.listServices(lab_pb.ListServicesRequest());
+    return r.services
+        .map((s) => Deployment(
+              name: s.name,
+              image: s.image,
+              replicas: s.replicas,
+              ready: s.ready,
+              namespace: s.namespace,
+              age: s.age,
+              ports: s.ports,
+              session: s.session,
+            ))
+        .toList();
+  }
+
+  Future<List<DeploymentPod>> deploymentPods(String name) async {
+    final r = await _ops.getService(lab_pb.GetServiceRequest(name: name));
+    return [
+      DeploymentPod(
+          name: r.service?.name ?? '',
+          ip: '',
+          phase: r.service?.status ?? 'running',
+          ready: (r.service?.ready ?? 0) > 0,
+          image: r.service?.image ?? '',
+          age: r.service?.age ?? '',
+          restarts: 0)
+    ];
+  }
+
+  Future<List<DeploymentEvent>> deploymentEvents(String name) async => [];
+
+  Future<void> restartDeployment(String name) async {
+    await _ops.scaleService(
+        lab_pb.ScaleServiceRequest(name: name, replicas: 1));
+  }
+
+  Future<Map<String, dynamic>> deploymentStatus(String name) async {
+    final r = await _ops.getService(lab_pb.GetServiceRequest(name: name));
+    return _serviceToMap(r.service);
+  }
+
+  Future<Map<String, dynamic>> deploy(Map<String, dynamic> body) async {
+    final r = await _ops.launchService(lab_pb.LaunchServiceRequest(
+      image: body['image'] as String? ?? '',
+      name: body['name'] as String? ?? '',
+      session: body['session'] as String? ?? '',
+      org: body['org'] as String? ?? '',
+      repo: body['repo'] as String? ?? '',
+    ));
+    return {'ok': r.ok, 'error': r.error, 'name': r.name, 'url': r.url};
+  }
+
+  Future<void> destroySandbox(String session) async {
+    await _ops.deleteService(lab_pb.DeleteServiceRequest(name: session));
+  }
+
+  Future<void> destroyDeployment(String name) async {
+    await _ops.deleteService(lab_pb.DeleteServiceRequest(name: name));
+  }
+
+  Future<OpsStatus> status() async {
+    final r = await _lab.status(lab_pb.StatusRequest());
+    return OpsStatus(
+        ok: r.ok, version: r.version, sandboxes: r.sandboxes.toInt());
+  }
+
+  Future<List<ContainerfileTemplate>> containerfileTemplates() async => [];
+
+  Future<Map<String, dynamic>> buildImage(Map<String, dynamic> body) async {
+    final r = await _ops.build(lab_pb.BuildRequest(
+      org: body['org'] as String? ?? '',
+      repo: body['repo'] as String? ?? '',
+      ref: body['ref'] as String? ?? '',
+      tag: body['tag'] as String? ?? '',
+      context: body['context'] as String? ?? '',
+      dockerfilePath: body['dockerfile_path'] as String? ?? '',
+    ));
+    return {'ok': r.ok, 'task_id': r.taskId, 'error': r.error};
+  }
+
+  Future<List<PublishSpec>> publishSpecs() async {
+    final r = await _registry.listPublishSpecs(lab_pb.ListPublishSpecsRequest());
+    return r.specs
+        .map((s) => PublishSpec(
+              protocol: s.protocol,
+              args: s.args,
+              required: s.required,
+            ))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> publishPackage(Map<String, dynamic> body) async {
+    final r = await _ops.run(lab_pb.RunRequest(
+      protocol: body['protocol'] as String? ?? '',
+      org: body['org'] as String? ?? '',
+      repo: body['repo'] as String? ?? '',
+      name: body['name'] as String? ?? '',
+      version: body['version'] as String? ?? '',
+    ));
+    return {'ok': r.ok, 'task_id': r.taskId, 'error': r.error};
+  }
+
+  Future<List<JobInfo>> jobs(String session) async {
+    final r = await _ops.listTasks(lab_pb.ListTasksRequest());
+    return r.tasks
+        .map((t) => JobInfo(
+              id: t.id,
+              command: t.command,
+              state: t.state,
+            ))
+        .toList();
+  }
+
+  Future<ExecResult> exec(String session, String command) async {
+    final r = await _ops.sandboxExec(
+        lab_pb.SandboxExecRequest(name: session, command: command));
+    return ExecResult(
+      exitCode: r.exitCode.toInt(),
+      output: r.output,
+      jobId: r.jobId,
+      backgrounded: r.backgrounded,
+      note: r.note,
+      error: r.error,
+    );
+  }
+
+  Future<void> kill(String session, String jobId) async {
+    await _ops.sandboxJobKill(
+        lab_pb.SandboxJobKillRequest(name: session, jobId: jobId));
+  }
+
+  Future<Map<String, dynamic>> jobOutput(String session, String jobId) async {
+    final r = await _ops.getTask(lab_pb.GetTaskRequest(id: jobId));
+    return {'state': r.task?.state ?? '', 'id': r.task?.id ?? ''};
+  }
+
+  // ---- registry / packages ----
+
+  Future<List<PackageTypeEntry>> listPackageTypes() async {
+    final r = await _registry.listPackageTypes(lab_pb.ListPackageTypesRequest());
+    return r.packages
+        .map((p) => PackageTypeEntry(
+            type: p.type, upstream: p.upstream, packages: p.packages.toInt()))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> listAllPackages(
+      {String? type,
+      String? q,
+      int page = 1,
+      int pageSize = 50,
+      int limit = 50,
+      int offset = 0}) async {
+    final r = await _registry.listPackages(lab_pb.ListPackagesRequest(
+      type: type ?? '',
+      q: q ?? '',
+      page: page,
+      pageSize: pageSize,
+      limit: limit,
+      offset: offset,
+    ));
+    return {'packages': r.packages.map(pkgToMap).toList()};
+  }
+
+  Future<PackageInfo2> packageVersions(String type, String name) async {
+    final r = await _registry.packageVersions(
+        lab_pb.PackageVersionsRequest(type: type, name: name));
+    return PackageInfo2(
+      name: name,
+      type: type,
+      versions: r.versions
+          .map((v) => PackageVersion(
+                version: v.version,
+                downloadCount: v.downloadCount.toInt(),
+                createdUnix: v.createdUnix.toInt(),
+                files: v.files
+                    .map((f) => PackageVersionFile(
+                          name: f.name,
+                          size: f.size.toInt(),
+                          sha256: f.sha,
+                        ))
+                    .toList(),
+              ))
+          .toList(),
+    );
+  }
+
+  Future<void> deletePackage(String type, String name) async {
+    await _registry.deletePackage(
+        lab_pb.DeletePackageRequest(type: type, name: name));
+  }
+
+  Future<void> deletePackageVersion(
+          String type, String name, String version) async {
+    await _registry.deletePackageVersion(
+        lab_pb.DeletePackageVersionRequest(type: type, name: name, version: version));
+  }
+
+  Future<List<String>> ociCatalog() async {
+    return [];
+  }
+
+  // ---- STREAMING (kept on the REST/SSE surface) ----
 
   Stream<StreamEvent> streamEvents(String sessionId) {
-    final req = http.Request('GET', _u('/api/v1/sessions/${_enc(sessionId)}/stream'))
-      ..headers.addAll(_headers);
+    final req = http.Request(
+        'GET', Uri.parse('$baseUrl/api/v1/sessions/${Uri.encodeComponent(sessionId)}/stream'))
+      ..headers['Accept'] = 'text/event-stream';
+    if (token.isNotEmpty) req.headers['Authorization'] = 'Bearer $token';
 
     final ctrl = StreamController<StreamEvent>();
     late final http.Client client;
-    client = this.client;
+    client = http;
     client.send(req).then((resp) {
       if (resp.statusCode != 200) {
         ctrl.addError(ApiException(resp.statusCode, 'stream ${resp.statusCode}'));
@@ -253,437 +737,145 @@ class EasyLabClient {
       try {
         final decoded = jsonDecode(text);
         if (decoded is Map<String, dynamic>) params = decoded;
-      } catch (_) {/* non-JSON data: ignore */ }
+      } catch (_) {}
     }
     ctrl.add(StreamEvent(event, params));
   }
 
-  /// `/api/v1/ops/tasks/{id}/stream` build/task events (log/state/done).
   Stream<TaskLogLine> buildStream(String buildId) {
-    final req = http.Request(
-        'GET', _u('/api/v1/ops/tasks/${_enc(buildId)}/stream'))
-      ..headers.addAll(_headers);
-
     final ctrl = StreamController<TaskLogLine>();
-    client.send(req).then((resp) {
-      if (resp.statusCode != 200) {
-        ctrl.addError(ApiException(resp.statusCode, 'stream ${resp.statusCode}'));
-        return;
-      }
-      final lines = <String>[];
-      StreamSubscription? sub;
-      sub = resp.stream.transform(const Utf8Decoder(allowMalformed: true)).listen(
-        (chunk) {
-          for (final line in chunk.split('\n')) {
-            if (line.isEmpty) {
-              _emitTask(ctrl, lines);
-              lines.clear();
-              continue;
-            }
-            lines.add(line);
-          }
-        },
-        onError: (Object e) => ctrl.addError(e),
-        onDone: () {
-          _emitTask(ctrl, lines);
-          ctrl.close();
-        },
-        cancelOnError: false,
-      );
-      ctrl.onCancel = () => sub?.cancel();
-    }, onError: (Object e) {
-      ctrl.addError(e);
-      ctrl.close();
-    });
+    _ops.taskLog(lab_pb.TaskLogRequest(id: buildId)).listen((e) {
+      ctrl.add(TaskLogLine(e.stream, e.line));
+    }, onDone: () => ctrl.close());
     return ctrl.stream;
   }
+}
 
-  void _emitTask(StreamController<TaskLogLine> ctrl, List<String> lines) {
-    String event = 'log';
-    final data = StringBuffer();
-    for (final line in lines) {
-      if (line.startsWith('event:')) {
-        event = line.substring(6).trim();
-      } else if (line.startsWith('data:')) {
-        if (data.isNotEmpty) data.write('\n');
-        data.write(line.substring(5).trim());
-      }
-    }
-    if (event == 'done') {
-      ctrl.close();
-      return;
-    }
-    ctrl.add(TaskLogLine(event, data.toString()));
-  }
+// ---- pb -> model mapping helpers ----
 
-  // ---- repositories (EasyLab Lab core, revision-native) ----
-
-  Future<List<OrgNode>> repos() async {
-    final j = await _get('/api/v1/repo') as List;
-    final byOrg = <String, List<RepoNode>>{};
-    for (final e in j) {
-      final m = e as Map<String, dynamic>;
-      final org = m['namespace'] as String? ?? '';
-      final repo = m['name'] as String? ?? '';
-      byOrg.putIfAbsent(org, () => []).add(RepoNode(
-            repo: repo,
-            branches: [],
-          ));
-    }
-    return byOrg.entries.map((e) => OrgNode(org: e.key, repos: e.value)).toList();
-  }
-
-  Future<List<FileEntry>> listFiles(String org, String repo, String dir,
-      [String? ref]) async {
-    final query = <String, dynamic>{
-      if (ref != null && ref.isNotEmpty) 'ref': ref,
-      if (dir.isNotEmpty) 'path': dir,
-    };
-    final j = await _get(
-        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/tree', query) as Map<String, dynamic>;
-    return _list(j, FileEntry.fromJson, 'entries');
-  }
-
-  Future<String> readFile(String org, String repo, String filePath,
-      [String? ref]) async {
-    final query = <String, dynamic>{
-      if (ref != null && ref.isNotEmpty) 'ref': ref,
-    };
-    final j = await _get(
-        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/contents/${_enc(filePath)}',
-        query) as Map<String, dynamic>;
-    return utf8.decode(base64Decode(j['content'] as String? ?? ''));
-  }
-
-  Future<String> adoptSession(String org, String repo, String branch) async {
-    // The agent backend keys sessions by name; adopting a repo/branch creates
-    // (or returns) the canonical session for that workspace.
-    final name = '$org-$repo-${branch.isEmpty ? 'main' : branch}';
-    final j = await _post('/api/v1/sessions', {
-      'name': name,
-      'org': org,
-      'repo': repo,
-      'branch': branch.isEmpty ? 'main' : branch,
-    }) as Map<String, dynamic>;
-    return j['session_name'] as String? ?? name;
-  }
-
-  Future<void> ensureOrg(String org) =>
-      _post('/api/v1/repos/ensure-org', {'org': org});
-
-  Future<void> ensureRepo(String org, String repo) =>
-      _post('/api/v1/repos/ensure', {'org': org, 'repo': repo});
-
-  Future<void> cloneRepo(String org, String repo, String gitUrl,
-      [String? token, String? rev]) async {
-    await ensureRepo(org, repo);
-    var url = gitUrl;
-    if (token != null && token.isNotEmpty) {
-      // http(s) credentials-style token, appended to the URL authority.
-      final m = RegExp(r'^(https?://)(.*)$').firstMatch(url);
-      if (m != null) {
-        url = '${m.group(1)}${Uri.encodeComponent(token)}@${m.group(2)}';
-      }
-    }
-    await _post('/api/v1/repo/${_enc(org)}/${_enc(repo)}/mirror/pull', {
-      'url': url,
-      if (rev != null && rev.isNotEmpty) 'rev': rev,
-    });
-  }
-
-  Future<void> deleteBranch(String org, String repo, String branch) =>
-      _del('/api/v1/repo/${_enc(org)}/${_enc(repo)}/branches/${_enc(branch)}');
-
-  Future<void> deleteRepo(String org, String repo) =>
-      _del('/api/v1/repo/${_enc(org)}/${_enc(repo)}');
-
-  Future<void> deleteOrg(String org) async {
-    final nodes = await repos();
-    final node = nodes.where((n) => n.org == org).firstOrNull;
-    if (node == null) return;
-    for (final r in node.repos) {
-      await deleteRepo(org, r.repo);
-    }
-  }
-
-  Future<List<DiffFile>> diffChange(String org, String repo, String changeId,
-      [String? path]) async {
-    final query = <String, dynamic>{
-      if (path != null && path.isNotEmpty) 'path': path,
-    };
-    final j = await _get(
-        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/revisions/${_enc(changeId)}/diff',
-        query) as Map<String, dynamic>;
-    return _list(j, DiffFile.fromJson, 'files');
-  }
-
-  Future<String> fileAtChange(String org, String repo, String changeId,
-      String filePath) async {
-    final j = await _get(
-        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/contents/${_enc(filePath)}',
-        {'ref': changeId}) as Map<String, dynamic>;
-    return utf8.decode(base64Decode(j['content'] as String? ?? ''));
-  }
-
-  Future<List<FileCommit>> fileLog(String org, String repo, String filePath,
-      [String? ref]) async {
-    final query = <String, dynamic>{
-      'path': filePath,
-      if (ref != null && ref.isNotEmpty) 'ref': ref,
-    };
-    final j = await _get(
-        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/history', query) as List;
-    return (j).map((e) => FileCommit.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<String> fileDiff(String org, String repo, String changeId,
-      String filePath) async {
-    final files = await diffChange(org, repo, changeId, filePath);
-    for (final f in files) {
-      if (f.path == filePath) return f.diffText ?? '';
-    }
-    return '';
-  }
-
-  Future<List<FileCommit>> log(String org, String repo,
-      {String? ref, int limit = 30}) async {
-    final query = <String, dynamic>{
-      'limit': limit,
-      if (ref != null && ref.isNotEmpty) 'ref': ref,
-    };
-    final j = await _get(
-        '/api/v1/repo/${_enc(org)}/${_enc(repo)}/revisions', query) as List;
-    return j.map((e) => FileCommit.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<List<GitTag>> tags(String org, String repo) async {
-    final j = await _get('/api/v1/repo/${_enc(org)}/${_enc(repo)}/tags') as List;
-    return j.map((e) => GitTag.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<List<String>> blame(String org, String repo, String filePath,
-      [String? ref]) async {
-    final query = <String, dynamic>{
-      'path': filePath,
-      if (ref != null && ref.isNotEmpty) 'ref': ref,
-    };
-    final j = await _get('/api/v1/repo/${_enc(org)}/${_enc(repo)}/blame', query)
-        as List;
-    return j.map((e) {
-      final m = e as Map<String, dynamic>;
-      return m['author'] as String? ?? '';
-    }).toList();
-  }
-
-  Future<Map<String, dynamic>> mirrors() async =>
-      <String, dynamic>{'mirrors': []};
-
-  // ---- agent settings (proxied through the gateway) ----
-
-  Future<Map<String, String>> config() async {
-    final j = await _get('/api/v1/config') as Map<String, dynamic>;
-    return (j['providers'] as Map?)?.cast<String, String>() ?? {};
-  }
-
-  Future<void> setConfig(Map<String, String> entries) =>
-      _post('/api/v1/config', entries);
-
-  Future<Map<String, ProviderInfo>> providers() async {
-    final j = await _get('/api/v1/providers') as Map<String, dynamic>;
-    final out = <String, ProviderInfo>{};
-    final src = j['providers'] as Map? ?? {};
-    src.forEach((k, v) {
-      if (v is Map<String, dynamic>) out['$k'] = ProviderInfo.fromJson(v);
-    });
-    return out;
-  }
-
-  Future<void> registerProvider(ProviderInfo p) =>
-      _post('/api/v1/providers', p.toJson());
-
-  Future<void> deleteProvider(String pid) =>
-      _del('/api/v1/providers/${_enc(pid)}');
-
-  Future<Map<String, dynamic>> testProvider(
-      {String? providerId,
-      String? model,
-      String? apiType,
-      String? baseUrl,
-      String? apiKey}) async {
-    return await _post('/api/v1/providers/test', {
-      if (providerId != null) 'provider_id': providerId,
-      if (model != null) 'model': model,
-      if (apiType != null) 'api_type': apiType,
-      if (baseUrl != null) 'base_url': baseUrl,
-      if (apiKey != null) 'api_key': apiKey,
-    }) as Map<String, dynamic>;
-  }
-
-  Future<List<ModelInfo>> models() async {
-    final j = await _get('/api/v1/models') as Map<String, dynamic>;
-    return _list(j, ModelInfo.fromJson, 'models');
-  }
-
-  Future<List<Preset>> presets() async {
-    final j = await _get('/api/v1/presets') as List;
-    return j.map((e) => Preset.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<void> savePreset(Preset p) => _post('/api/v1/presets', p.toJson());
-
-  Future<void> deletePreset(String id) => _del('/api/v1/presets/${_enc(id)}');
-
-  Future<List<ToolInfo>> tools() async {
-    final j = await _get('/api/v1/tools') as Map<String, dynamic>;
-    return _list(j, ToolInfo.fromJson, 'tools');
-  }
-
-  Future<Map<String, dynamic>> toolConfig() async =>
-      await _get('/api/v1/tool-config') as Map<String, dynamic>;
-
-  Future<Map<String, dynamic>> setToolConfig(Map<String, dynamic> cfg) async {
-    return await _post('/api/v1/tool-config', cfg) as Map<String, dynamic>;
-  }
-
-  // ---- deployments & sandboxes (EasyLab ops surface) ----
-
-  Future<Map<String, dynamic>> k8sConfig() async {
-    final j = await _get('/api/v1/ops/namespaces') as Map<String, dynamic>;
-    return j;
-  }
-
-  Future<List<Sandbox>> sandboxes() async {
-    final j = await _get('/api/v1/ops/services') as List;
-    return j.map((e) => Sandbox.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<List<Deployment>> deployments() async {
-    final j = await _get('/api/v1/ops/services') as List;
-    return j.map((e) => Deployment.fromJson(e as Map<String, dynamic>)).toList();
-  }
-
-  Future<List<DeploymentPod>> deploymentPods(String name) async {
-    final j = await _get('/api/v1/ops/services/${_enc(name)}')
-        as Map<String, dynamic>;
-    return _list(j, DeploymentPod.fromJson, 'containers');
-  }
-
-  Future<List<DeploymentEvent>> deploymentEvents(String name) async => [];
-
-  Future<void> restartDeployment(String name) =>
-      _post('/api/v1/ops/services/${_enc(name)}/scale', {'replicas': 1});
-
-  Future<Map<String, dynamic>> deploymentStatus(String name) async =>
-      await _get('/api/v1/ops/services/${_enc(name)}') as Map<String, dynamic>;
-
-  Future<Map<String, dynamic>> deploy(Map<String, dynamic> body) async =>
-      await _post('/api/v1/ops/services', body) as Map<String, dynamic>;
-
-  Future<void> destroySandbox(String session) =>
-      _del('/api/v1/ops/services/${_enc(session)}');
-
-  Future<void> destroyDeployment(String name) =>
-      _del('/api/v1/ops/services/${_enc(name)}');
-
-  Future<OpsStatus> status() async {
-    final j = await _get('/api/v1/status') as Map<String, dynamic>;
-    return OpsStatus.fromJson(j);
-  }
-
-  Future<List<ContainerfileTemplate>> containerfileTemplates() async {
-    final j = await _get('/api/v1/containerfile-templates')
-        as Map<String, dynamic>;
-    return _list(j, ContainerfileTemplate.fromJson, 'templates');
-  }
-
-  Future<Map<String, dynamic>> buildImage(Map<String, dynamic> body) async =>
-      await _post('/api/v1/ops/builds', body) as Map<String, dynamic>;
-
-  Future<List<PublishSpec>> publishSpecs() async {
-    final j = await _get('/api/v1/publish-specs') as Map<String, dynamic>;
-    return _list(j, PublishSpec.fromJson, 'specs');
-  }
-
-  Future<Map<String, dynamic>> publishPackage(Map<String, dynamic> body) async =>
-      await _post('/api/v1/ops/runs', body) as Map<String, dynamic>;
-
-  // ---- sandboxes: exec / jobs (EasyLab ops sandbox passthrough) ----
-
-  Future<List<JobInfo>> jobs(String session) async {
-    final j = await _get('/api/v1/ops/tasks') as Map<String, dynamic>;
-    return _list(j, JobInfo.fromJson, 'tasks');
-  }
-
-  Future<ExecResult> exec(String session, String command) async {
-    final j = await _post('/api/v1/ops/sandbox/${_enc(session)}/exec', {
-      'command': command,
-    }) as Map<String, dynamic>;
-    return ExecResult.fromJson(j);
-  }
-
-  Future<void> kill(String session, String jobId) async {
-    await _del('/api/v1/ops/sandbox/${_enc(session)}/jobs/${_enc(jobId)}/kill');
-  }
-
-  Future<Map<String, dynamic>> jobOutput(
-      String session, String jobId) async {
-    return await _get('/api/v1/ops/tasks/${_enc(jobId)}')
-        as Map<String, dynamic>;
-  }
-
-  // ---- packages (EasyLab registry) ----
-
-  Future<List<PackageTypeEntry>> listPackageTypes() async {
-    final j = await _get('/api/v1/packages') as Map<String, dynamic>;
-    return _list(j, PackageTypeEntry.fromJson, 'packages');
-  }
-
-  Future<Map<String, dynamic>> listAllPackages(
-      {String? type,
-      String? q,
-      int page = 1,
-      int pageSize = 50,
-      int limit = 50,
-      int offset = 0}) async {
-    final query = <String, dynamic>{
-      'page': page,
-      'page_size': pageSize,
-      'limit': limit,
-      'offset': offset,
-      if (type != null && type.isNotEmpty) 'type': type,
-      if (q != null && q.isNotEmpty) 'q': q,
-    };
-    return await _get('/api/v1/packages/list', query) as Map<String, dynamic>;
-  }
-
-  Future<PackageInfo2> packageVersions(String type, String name) async {
-    final j = await _get('/api/v1/packages/${_enc(type)}/${_enc(name)}')
-        as Map<String, dynamic>;
-    return PackageInfo2(
-      name: name,
-      type: type,
-      versions:
-          _list(j, PackageVersion.fromJson, 'versions'),
+Session sessionFromPb(agent_pb.Session s) => Session(
+      id: s.name,
+      org: s.org,
+      repo: s.repo,
+      branch: s.branch,
+      model: s.model,
+      preset: s.preset,
+      tipId: s.tipId.isEmpty ? null : s.tipId,
+      maxTurns: s.maxTurns == 0 ? null : s.maxTurns,
+      systemPrompt: s.systemPrompt.isEmpty ? null : s.systemPrompt,
+      inputTokens: s.inputTokens,
+      outputTokens: s.outputTokens,
+      totalTokens: s.totalTokens,
+      lastInputTokens: s.lastInputTokens,
+      lastOutputTokens: s.lastOutputTokens,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      unreadCount: s.unreadCount,
+      lastMessageAt: s.lastMessageAt,
+      lastMessagePreview: s.lastMessagePreview,
     );
-  }
 
-  Future<void> deletePackage(String type, String name) =>
-      _del('/api/v1/packages/${_enc(type)}/${_enc(name)}');
-
-  Future<void> deletePackageVersion(
-          String type, String name, String version) =>
-      _del('/api/v1/packages/${_enc(type)}/${_enc(name)}/${_enc(version)}');
-
-  Future<List<String>> ociCatalog() async {
-    final j = await client.get(
-      Uri.parse('$baseUrl/v2/_catalog'),
-      headers: _headers,
+Message messageFromPb(agent_pb.Message m) => Message(
+      id: m.id,
+      role: m.role,
+      createdAt: m.createdAt,
+      parts: m.parts
+          .map((p) => MessagePart(
+                id: p.id,
+                type: p.type,
+                text: _partText(p),
+              ))
+          .toList(),
     );
-    final body = _decode(j) as Map<String, dynamic>;
-    return ((body['repositories'] as List?) ?? [])
-        .map((e) => e.toString())
-        .toList();
+
+String _partText(agent_pb.Part p) {
+  try {
+    final j = jsonDecode(p.data);
+    if (j is Map<String, dynamic>) return j['text'] as String? ?? '';
+  } catch (_) {}
+  return p.data;
+}
+
+FileCommit commitFromPb(lab_pb.CommitInfo c) => FileCommit(
+      changeId: c.changeId,
+      commitId: c.commitId,
+      author: c.author,
+      timestamp: c.timestamp,
+      message: c.message,
+    );
+
+Map<String, dynamic> _structToMap(\$wkt.Struct? s) {
+  final out = <String, dynamic>{};
+  (s?.fields ?? {}).forEach((k, v) {
+    out[k] = _fromValue(v);
+  });
+  return out;
+}
+
+dynamic _fromValue(\$wkt.Value v) {
+  switch (v.whichValue()) {
+    case 1:
+      return v.nullValue_;
+    case 2:
+      return v.numberValue;
+    case 3:
+      return v.stringValue;
+    case 4:
+      return v.boolValue;
+    case 5:
+      return _structToMap(v.structValue);
+    case 6:
+      return v.listValue.values.map(_fromValue).toList();
   }
+  return null;
+}
+
+\$wkt.Struct _mapToStruct(Map<String, dynamic> v) {
+  final s = \$wkt.Struct();
+  v.forEach((k, val) {
+    s.fields[k] = _toValue(val);
+  });
+  return s;
+}
+
+\$wkt.Value _toValue(dynamic v) {
+  if (v == null) return \$wkt.Value()..nullValue_ = \$wkt.NullValue.NULL_VALUE;
+  if (v is bool) return \$wkt.Value()..boolValue = v;
+  if (v is int) return \$wkt.Value()..numberValue = v.toDouble();
+  if (v is double) return \$wkt.Value()..numberValue = v;
+  if (v is String) return \$wkt.Value()..stringValue = v;
+  if (v is Map) {
+    final s = \$wkt.Struct();
+    v.forEach((k, val) => s.fields[k as String] = _toValue(val));
+    return \$wkt.Value()..structValue = s;
+  }
+  if (v is List) {
+    final l = \$wkt.ListValue();
+    for (final e in v) {
+      l.values.add(_toValue(e));
+    }
+    return \$wkt.Value()..listValue = l;
+  }
+  return \$wkt.Value()..stringValue = v.toString();
+}
+
+Map<String, dynamic> _serviceToMap(lab_pb.ServiceInfo? s) {
+  if (s == null) return {};
+  return {
+    'name': s.name,
+    'image': s.image,
+    'replicas': s.replicas,
+    'ready': s.ready,
+    'namespace': s.namespace,
+    'age': s.age,
+    'ports': s.ports,
+    'status': s.status,
+    'url': s.url,
+  };
+}
+
+Map<String, dynamic> pkgToMap(lab_pb.PackageInfo p) {
+  return {'type': p.type, 'name': p.name};
 }
 
 class PackageInfo2 {
