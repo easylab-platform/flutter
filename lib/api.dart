@@ -9,10 +9,10 @@ import 'package:connectrpc/http2.dart';
 import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
 
-import 'gen/agent/v1/agent.pb.dart' as agent_pb;
-import 'gen/agent/v1/agent.connect.client.dart' as agent_client;
-import 'gen/easylab/v1/easylab.pb.dart' as lab_pb;
-import 'gen/easylab/v1/easylab.connect.client.dart' as lab_client;
+import 'package:easylab_client_sdk/src/gen/agent/v1/agent.pb.dart' as agent_pb;
+import 'package:easylab_client_sdk/src/gen/agent/v1/agent.connect.client.dart' as agent_client;
+import 'package:easylab_client_sdk/src/gen/easylab/v1/easylab.pb.dart' as lab_pb;
+import 'package:easylab_client_sdk/src/gen/easylab/v1/easylab.connect.client.dart' as lab_client;
 
 import 'models.dart';
 import 'net/http_client_factory.dart';
@@ -679,68 +679,12 @@ class EasyLabClient {
   // ---- STREAMING (kept on the REST/SSE surface) ----
 
   Stream<StreamEvent> streamEvents(String sessionId) {
-    final req = http.Request(
-        'GET', Uri.parse('$baseUrl/api/v1/sessions/${Uri.encodeComponent(sessionId)}/stream'))
-      ..headers['Accept'] = 'text/event-stream';
-    if (token.isNotEmpty) req.headers['Authorization'] = 'Bearer $token';
-
-    final ctrl = StreamController<StreamEvent>();
-    late final http.Client client;
-    client = http;
-    client.send(req).then((resp) {
-      if (resp.statusCode != 200) {
-        ctrl.addError(ApiException(resp.statusCode, 'stream ${resp.statusCode}'));
-        return;
-      }
-      final lines = <String>[];
-      StreamSubscription? sub;
-      sub = resp.stream.transform(const Utf8Decoder(allowMalformed: true)).listen(
-        (chunk) {
-          for (final line in chunk.split('\n')) {
-            if (line.isEmpty) {
-              if (lines.isNotEmpty) _emit(ctrl, lines);
-              lines.clear();
-              continue;
-            }
-            lines.add(line);
-          }
-        },
-        onError: (Object e) => ctrl.addError(e),
-        onDone: () {
-          if (lines.isNotEmpty) _emit(ctrl, lines);
-          ctrl.close();
-        },
-        cancelOnError: false,
-      );
-      ctrl.onCancel = () => sub?.cancel();
-    }, onError: (Object e) {
-      ctrl.addError(e);
-      ctrl.close();
-    });
-    return ctrl.stream;
+    return _agent
+        .watchSession(agent_pb.WatchSessionRequest(id: sessionId))
+        .map((e) => StreamEvent(e.event, _structToMap(e.params)));
   }
 
-  void _emit(StreamController<StreamEvent> ctrl, List<String> lines) {
-    String event = 'message';
-    final data = StringBuffer();
-    for (final line in lines) {
-      if (line.startsWith('event:')) {
-        event = line.substring(6).trim();
-      } else if (line.startsWith('data:')) {
-        if (data.isNotEmpty) data.write('\n');
-        data.write(line.substring(5).trim());
-      }
-    }
-    Map<String, dynamic>? params;
-    final text = data.toString();
-    if (text.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(text);
-        if (decoded is Map<String, dynamic>) params = decoded;
-      } catch (_) {}
-    }
-    ctrl.add(StreamEvent(event, params));
-  }
+  Stream<StreamEvent> watchSession(String sessionId) => streamEvents(sessionId);
 
   Stream<TaskLogLine> buildStream(String buildId) {
     final ctrl = StreamController<TaskLogLine>();

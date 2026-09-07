@@ -37,10 +37,10 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   http: ^1.6.0
-  connectrpc: ^2.0.0
-  protobuf: ^6.0.0
-  fixnum: ^1.1.1
-  http2: ^2.3.0
+  easylab_client_sdk:
+    git:
+      url: https://github.com/easylab-platform/easylab-client-sdk-dart.git
+      ref: v0.1.0
   shared_preferences: ^2.5.5
   flutter_markdown_plus: ^1.0.0
   collection: ^1.19.1
