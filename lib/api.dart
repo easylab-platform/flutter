@@ -47,7 +47,8 @@ class EasyLabApi {
 
   EasyLabApi({required this.baseUrl, required this.token})
       : client = http.Client() {
-    _sdk = sdk.EasyLabClient(baseUrl: baseUrl, token: token);
+    _sdk = sdk.EasyLabClient(baseUrl: baseUrl, token: token,
+        securityContext: _caContext);
     _agent = _sdk.agent;
     _lab = _sdk.lab;
     _ops = _sdk.ops;
@@ -57,7 +58,8 @@ class EasyLabApi {
       {required this.baseUrl,
       required this.token,
       required this.client}) {
-    _sdk = sdk.EasyLabClient(baseUrl: baseUrl, token: token);
+    _sdk = sdk.EasyLabClient(baseUrl: baseUrl, token: token,
+        securityContext: _caContext);
     _agent = _sdk.agent;
     _lab = _sdk.lab;
     _ops = _sdk.ops;
@@ -193,51 +195,37 @@ class EasyLabApi {
 
   // ---- attachment upload (memory-extension /api/v1/files) ----
 
-  /// Uploads a single file via multipart and resolves to [UploadedFile].
-  /// The content is deduplicated by sha256: an identical prior upload returns
-  /// the same [code], so the model sees a stable `file:<code>` reference.
+  /// Uploads a file by bytes over Connect (agent.v1 IngestFile) and resolves
+  /// to [UploadedFile]. The content is deduplicated by sha256: an identical
+  /// prior upload returns the same [code] (the server mints/stabilizes it).
   Future<UploadedFile> uploadFile(UploadedFileSource src) async {
-    final req = http.MultipartRequest(
-      'POST',
-      _u('/api/v1/files'),
-    );
-    req.headers['Authorization'] = _headers['Authorization'] ?? '';
-    req.files.add(await http.MultipartFile.fromPath(
-      'file',
-      src.path,
-      filename: src.name,
-      contentType: MediaType.parse(src.mimeType),
+    final bytes = await io.File(src.path).readAsBytes();
+    final r = await _agent.ingestFile(sdk.IngestFileRequest(
+      data: bytes,
+      name: src.name,
+      mime: src.mimeType,
     ));
-    final streamed = await client.send(req);
-    final resp = await http.Response.fromStream(streamed);
-    final j = jsonDecode(resp.body) as Map<String, dynamic>;
-    if (resp.statusCode >= 400) throw ApiException(resp.statusCode, resp.body);
-    return UploadedFile.fromJson(j);
-  }
-
-  /// Streams the bytes of a previously uploaded file for preview/download.
-  /// Uses plain GET to the files endpoint (supports image thumbnails).
-  Future<List<int>> fetchFileBytes(String code) async {
-    final r = await client.get(
-      _u('/api/v1/files/$code'),
-      headers: {'Authorization': _headers['Authorization'] ?? ''},
+    return UploadedFile(
+      code: r.code,
+      name: src.name,
+      mime: src.mimeType,
+      size: bytes.length,
+      deduped: false,
     );
-    if (r.statusCode != 200) throw ApiException(r.statusCode, r.body);
-    return r.bodyBytes;
   }
 
-  /// Lightweight HEAD over a stored file to learn its content-type + length
-  /// without downloading the body. Used to render historical attachments that
-  /// were stored without name/mime metadata.
+  /// Fetches the bytes of a previously uploaded file (agent.v1 GetFile).
+  Future<List<int>> fetchFileBytes(String code) async {
+    final r = await _agent.getFile(sdk.GetFileRequest(code: code));
+    return r.data;
+  }
+
+  /// Reads a stored file's metadata (name/mime/size) via agent.v1 GetFileMeta,
+  /// so historical attachments can render a content-type + length without
+  /// downloading the body.
   Future<({String? contentType, int length})> fileHead(String code) async {
-    final req = http.Request('HEAD', _u('/api/v1/files/$code'));
-    req.headers.addAll(_headers);
-    final streamed = await client.send(req);
-    final resp = await http.Response.fromStream(streamed);
-    if (resp.statusCode != 200) throw ApiException(resp.statusCode, resp.body);
-    final ct = resp.headers['content-type'];
-    final len = int.tryParse(resp.headers['content-length'] ?? '') ?? 0;
-    return (contentType: ct, length: len);
+    final r = await _agent.getFileMeta(sdk.GetFileMetaRequest(code: code));
+    return (contentType: r.mime, length: r.size);
   }
 
   /// Platform-relative path of a stored file (for streaming download +
@@ -274,8 +262,9 @@ class EasyLabApi {
     return _sessionFromSessionResults(r.session);
   }
 
-  Future<void> revert(String id, String? messageId) =>
-      _post('/api/v1/sessions/${_enc(id)}/undo', {'message_id': messageId});
+  Future<void> revert(String id, String? messageId) async {
+    await _agent.undo(sdk.UndoRequest(id: id, messageId: messageId ?? ''));
+  }
 
   Future<bool> interrupt(String id) async {
     final r = await _agent.interrupt(sdk.InterruptRequest(id: id));
@@ -287,8 +276,9 @@ class EasyLabApi {
     return r.ok;
   }
 
-  Future<void> markRead(String id) =>
-      _post('/api/v1/sessions/${_enc(id)}/read', null);
+  Future<void> markRead(String id) async {
+    await _agent.undo(sdk.UndoRequest(id: id));
+  }
 
   Future<(String, List<dynamic>)> state(String id) async {
     final r = await _agent.state(sdk.StateRequest(id: id));
@@ -328,39 +318,11 @@ class EasyLabApi {
         StructUtils.toJson(e.params)));
   }
 
-  /// SSE task log: POST returns `{ok, build_id}`; this streams
-  /// `/api/v1/builds/{id}/stream` with `log`/`state`/`done` events.
+  /// Streams a task's log (agent.v1/ops TaskLog over Connect).
   Stream<dynamic> taskStream(String buildId) {
-    final req = http.Request('GET', _u('/api/v1/builds/${_enc(buildId)}/stream'))
-      ..headers.addAll(_headers);
-    final ctrl = StreamController<dynamic>();
-    final client = this.client;
-    client.send(req).then((resp) {
-      if (resp.statusCode != 200) {
-        ctrl.addError(ApiException(resp.statusCode, 'stream ${resp.statusCode}'));
-        return;
-      }
-      resp.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen(
-        (line) {
-          if (!line.startsWith('data:')) return;
-          final data = line.substring(5).trim();
-          if (data.isEmpty) return;
-          try {
-            ctrl.add(jsonDecode(data));
-          } catch (_) {}
-        },
-        onError: ctrl.addError,
-        onDone: ctrl.close,
-        cancelOnError: false,
-      );
-    }).catchError((Object e) {
-      ctrl.addError(e);
-      ctrl.close();
+    return _ops.taskLog(sdk.TaskLogRequest(id: buildId)).map((r) {
+      return {'stream': r.stream, 'line': r.line};
     });
-    return ctrl.stream;
   }
 
   // ---- repos ----
@@ -505,9 +467,13 @@ class EasyLabApi {
   /// Set an extension config knob by id (e.g. memory/vlm_model). Delivers the
   /// validated change to the extension so tools pick it up immediately.
   Future<void> setToolConfigValue(
-          String extId, String name, Object? value) async =>
-      _put('/api/v1/tool-config/${_enc(extId)}/${_enc(name)}',
-          {'value': value});
+          String extId, String name, Object? value) async {
+    await _agent.setExtensionConfig(sdk.SetExtensionConfigRequest(
+      extId: extId,
+      name: name,
+      value: wkt.Value(stringValue: '$value'),
+    ));
+  }
 
   Future<List<GitTag>> tags(String org, String repo) async {
     final r = await _lab.tags(sdk.TagsRequest(org: org, repo: repo));
@@ -620,23 +586,36 @@ class EasyLabApi {
     return out;
   }
 
-  Future<void> registerProvider(ProviderInfo p) =>
-      _post('/api/v1/providers', p.toJson());
+  Future<void> registerProvider(ProviderInfo p) async {
+    await _agent.registerProvider(sdk.RegisterProviderRequest(
+      provider: sdk.Provider(
+        providerId: p.providerId,
+        apiType: p.apiType,
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        headers: p.headers?.entries,
+        models: p.models.map((m) => m.id),
+      ),
+    ));
+  }
 
   Future<void> deleteProvider(String pid) =>
-      _del('/api/v1/providers/${_enc(pid)}');
+      _agent.deleteProvider(sdk.DeleteProviderRequest(providerId: pid));
 
   Future<Map<String, dynamic>> testProvider(
           {required String apiType,
           required String baseUrl,
           required String apiKey,
-          String? model}) async =>
-      await _post('/api/v1/providers/test', {
-        'api_type': apiType,
-        'base_url': baseUrl,
-        'api_key': apiKey,
-        if (model != null && model.isNotEmpty) 'model': model,
-      }) as Map<String, dynamic>;
+          String? model}) async {
+    final r = await _agent.testProvider(sdk.TestProviderRequest(
+      providerId: '',
+      apiType: apiType,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+      model: model ?? '',
+    ));
+    return {'ok': r.ok, 'result': r.result};
+  }
 
   Future<List<ModelInfo>> models() async {
     final r = await _agent.listModels(sdk.ListModelsRequest());
@@ -683,14 +662,17 @@ class EasyLabApi {
 
   /// Set a single agent config key (e.g. locale) via `PUT /api/v1/config`.
   Future<void> setConfigKey(String key, String value) =>
-      _put('/api/v1/config', {'key': key, 'value': value});
+      _agent.setConfig(sdk.SetConfigRequest(key: key, value: value));
 
   /// Per-session language override (`PATCH /sessions/{id}/settings`).
   Future<Session> sessionLocale(String id, String locale) =>
       settings(id, {'locale': locale});
 
-  Future<Map<String, dynamic>> toolConfig() async =>
-      await _get('/api/v1/tool-config') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> toolConfig() async {
+    final r = await _agent.getToolConfig(sdk.GetToolConfigRequest());
+    return r.config.values
+        .map((k, v) => MapEntry(k, StructUtils.valueToJson(v)));
+  }
 
   // ---- infra ----
 
@@ -707,7 +689,7 @@ class EasyLabApi {
       podName: s.name,
       status: s.status,
       workerUrl: s.url,
-      podIp: '',
+      podIp: s.podIp,
       syncedRev: '',
     )).toList();
   }
@@ -722,14 +704,21 @@ class EasyLabApi {
       namespace: s.namespace,
       age: s.age,
       session: s.session,
-      ports: const [],
+      ports: s.ports.toList(),
     )).toList();
   }
 
   Future<List<DeploymentPod>> deploymentPods(String name) async {
-    final j = await _get('/api/v1/deployments/${_enc(name)}/pods')
-        as Map<String, dynamic>;
-    return _list(j, DeploymentPod.fromJson, 'pods');
+    final r = await _ops.getService(sdk.GetServiceRequest(name: name));
+    return r.pods.map((p) => DeploymentPod(
+      name: p.name,
+      ip: p.ip,
+      phase: p.phase,
+      ready: p.ready,
+      image: p.image,
+      age: p.age,
+      restarts: p.restarts,
+    )).toList();
   }
 
   Future<List<DeploymentEvent>> deploymentEvents(String name) async {
@@ -741,18 +730,40 @@ class EasyLabApi {
   Future<void> restartDeployment(String name) =>
       _post('/api/v1/deployments/${_enc(name)}/restart', null);
 
-  Future<Map<String, dynamic>> deploymentStatus(String name) async =>
-      await _get('/api/v1/deployments/${_enc(name)}/status')
-          as Map<String, dynamic>;
+  Future<Map<String, dynamic>> deploymentStatus(String name) async {
+    final r = await _ops.getService(sdk.GetServiceRequest(name: name));
+    return {
+      'name': r.service.name,
+      'image': r.service.image,
+      'replicas': r.service.replicas,
+      'ready': r.service.ready,
+      'phase': r.service.phase,
+      'status': r.service.status,
+    };
+  }
 
-  Future<Map<String, dynamic>> deploy(Map<String, dynamic> body) async =>
-      await _post('/api/v1/deployments', body) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> deploy(Map<String, dynamic> body) async {
+    final r = await _ops.launchService(sdk.LaunchServiceRequest(
+      name: (body['name'] ?? '') as String,
+      image: (body['image'] ?? '') as String,
+      kind: (body['kind'] ?? 'bare') as String,
+      env: (body['env'] as Map<String, String>?)?.entries,
+      replicas: ((body['replicas'] ?? 1) as num).toInt(),
+      ports: ((body['ports'] as List?) ?? const [])
+          .map((p) => sdk.PortSpec(
+            container: (((p as Map)['container'] ?? 0) as num).toInt(),
+            service: (((p)['service'] ?? 0) as num).toInt(),
+          )),
+      annotations: ((body['annotations'] as Map<String, String>?) ?? {}).entries,
+    ));
+    return {'ok': r.ok, 'name': r.name, 'url': r.url, 'error': r.error};
+  }
 
   Future<void> destroySandbox(String id) =>
-      _del('/api/v1/sandboxes/${_enc(id)}');
+      _ops.deleteService(sdk.DeleteServiceRequest(name: id));
 
   Future<void> destroyDeployment(String name) =>
-      _del('/api/v1/deployments/${_enc(name)}');
+      _ops.deleteService(sdk.DeleteServiceRequest(name: name));
 
   Future<OpsStatus> status() async {
     final r = await _lab.status(sdk.StatusRequest());
@@ -777,8 +788,12 @@ class EasyLabApi {
   }
 
   Future<List<PublishSpec>> publishSpecs() async {
-    final j = await _get('/api/v1/publish-specs') as Map<String, dynamic>;
-    return _list(j, PublishSpec.fromJson, 'specs');
+    final r = await _registry.listPublishSpecs(sdk.ListPublishSpecsRequest());
+    return r.specs.map((p) => PublishSpec(
+      protocol: p.protocol,
+      args: p.args.toList(),
+      required: p.required.toList(),
+    )).toList();
   }
 
   Future<Map<String, dynamic>> publishPackage(Map<String, dynamic> body) async =>
@@ -797,62 +812,81 @@ class EasyLabApi {
   }
 
   Future<ExecResult> exec(String session, String command) async {
-    final j = await _post('/api/v1/sandboxes/${_enc(session)}/exec', {
-      'command': command,
-    }) as Map<String, dynamic>;
-    return ExecResult.fromJson(j);
+    final r = await _ops.sandboxExec(sdk.SandboxExecRequest(
+        name: session, command: command));
+    return ExecResult(
+      exitCode: r.exitCode,
+      output: r.output,
+      jobId: r.jobId,
+      backgrounded: r.backgrounded,
+      note: r.note,
+      error: r.error,
+    );
   }
 
   Future<void> kill(String session, String jobId) =>
-      _post('/api/v1/sandboxes/${_enc(session)}/jobs/${_enc(jobId)}/kill', null);
+      _ops.sandboxJobKill(sdk.SandboxJobKillRequest(name: session, jobId: jobId));
 
   Future<Map<String, dynamic>> jobOutput(
-      String session, String jobId, String stream, int start, int end) async {
-    final j = await _get(
-      '/api/v1/sandboxes/${_enc(session)}/jobs/${_enc(jobId)}/output',
-      {'stream': stream, 'start': start, 'end': end},
-    ) as Map<String, dynamic>;
-    return j;
-  }
+      String session, String jobId, String stream, int start, int end) async =>
+      _get(
+        '/api/v1/sandboxes/${_enc(session)}/jobs/${_enc(jobId)}/output',
+        {'stream': stream, 'start': start, 'end': end},
+      ) as Map<String, dynamic>;
 
   // ---- packages ----
 
   Future<List<PackageTypeEntry>> listPackageTypes() async {
-    final j = await _get('/api/v1/packages') as Map<String, dynamic>;
-    return _list(j, PackageTypeEntry.fromJson, 'types');
+    final r = await _registry.listPackageTypes(sdk.ListPackageTypesRequest());
+    return r.packages.map((p) => PackageTypeEntry(
+      type: p.type, upstream: p.upstream, packages: p.packages,
+    )).toList();
   }
 
   Future<Map<String, dynamic>> listAllPackages(
       {String? type, String? q, int? limit, int? offset}) async {
-    final query = <String, dynamic>{
-      if (type != null && type.isNotEmpty) 'type': type,
-      if (q != null && q.isNotEmpty) 'q': q,
-      'limit': ?limit,
-      'offset': ?offset,
+    final r = await _registry.listPackages(sdk.ListPackagesRequest(
+      type: type ?? '',
+      q: q ?? '',
+      limit: limit ?? 0,
+      offset: offset ?? 0,
+    ));
+    return {
+      'packages': r.packages.map((p) => p).toList(),
+      'total': r.packages.length,
     };
-    return await _get('/api/v1/packages/list', query) as Map<String, dynamic>;
   }
 
   Future<PackageInfo2> packageVersions(String type, String name) async {
-    final j = await _get(
-            '/api/v1/packages/${_enc(type)}/${_enc(name)}/versions')
-        as Map<String, dynamic>;
-    final data = (j['data'] as Map?)?.cast<String, dynamic>() ?? {};
+    final r = await _registry.packageVersions(
+        sdk.PackageVersionsRequest(type: type, name: name));
     return PackageInfo2(
-      name: data['name'] as String? ?? name,
-      type: data['type'] as String? ?? type,
-      versions: ((data['versions'] as List?) ?? [])
-          .map((e) => PackageVersion.fromJson(e as Map<String, dynamic>))
+      name: name,
+      type: type,
+      versions: r.versions
+          .map((v) => PackageVersion(
+                version: v.version,
+                downloadCount: v.downloadCount,
+                createdUnix: v.createdUnix.toInt(),
+                files: v.files
+                    .map((f) => PackageVersionFile(
+                          name: f.name,
+                          size: f.size.toInt(),
+                          sha256: f.sha,
+                        ))
+                    .toList(),
+              ))
           .toList(),
     );
   }
 
   Future<void> deletePackage(String type, String name) =>
-      _del('/api/v1/packages/${_enc(type)}/${_enc(name)}');
+      _registry.deletePackage(sdk.DeletePackageRequest(type: type, name: name));
 
   Future<void> deletePackageVersion(
           String type, String name, String version) =>
-      _del('/api/v1/packages/${_enc(type)}/${_enc(name)}/${_enc(version)}');
+      _registry.deletePackageVersion(sdk.DeletePackageVersionRequest(
+          type: type, name: name, version: version));
 
   Future<List<String>> ociCatalog() async {
     final j = await client.get(
