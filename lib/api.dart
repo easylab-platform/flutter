@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' as io;
 
-import 'package:http/http.dart' as http_pkg;
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart' as $wkt;
 
 import 'package:connectrpc/connect.dart' as connect;
 import 'package:connectrpc/http2.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
 
@@ -15,7 +16,6 @@ import 'package:easylab_client_sdk/src/gen/easylab/v1/easylab.pb.dart' as lab_pb
 import 'package:easylab_client_sdk/src/gen/easylab/v1/easylab.connect.client.dart' as lab_client;
 
 import 'models.dart';
-import 'net/http_client_factory.dart';
 
 class StreamEvent {
   final String event;
@@ -47,15 +47,16 @@ class EasyLabClient {
   final lab_client.OpsServiceClient _ops;
   final lab_client.RegistryServiceClient _registry;
 
-  late final http_pkg.Client http;
-
   EasyLabClient({required this.baseUrl, required this.token})
       : _agent = agent_client.AgentServiceClient(_build(baseUrl, token)),
         _lab = lab_client.LabServiceClient(_build(baseUrl, token)),
         _ops = lab_client.OpsServiceClient(_build(baseUrl, token)),
         _registry = lab_client.RegistryServiceClient(_build(baseUrl, token)) {
-    http = http_pkg.Client();
+    // HTTP/2 (h2 over TLS) transport.
   }
+
+  static io.SecurityContext? _securityContext() =>
+      _caContext ?? io.SecurityContext(withTrustedRoots: true);
 
   static connect.Transport _build(String baseUrl, String token) {
     final trimmed = baseUrl.endsWith('/')
@@ -64,20 +65,30 @@ class EasyLabClient {
     final bindings = protocol.Transport(
       baseUrl: trimmed,
       codec: const ProtoCodec(),
-      httpClient: createHttpClient(),
+      httpClient: createHttpClient(
+        transport: Http2ClientTransport(context: _securityContext()),
+      ),
     );
     return bindings;
   }
 
+  static io.SecurityContext? _caContext;
+
   static Future<EasyLabClient> create(
       {required String baseUrl, required String token}) async {
-    // Warm up the custom CA client (kept for the SSE paths below).
-    final _ = await platformHttpClient();
+    // Load the bundled easylab CA so HTTP/2 TLS trusts the self-signed edge.
+    if (_caContext == null) {
+      final ctx = io.SecurityContext(withTrustedRoots: true);
+      try {
+        final data = await rootBundle.load('assets/certs/ca.crt');
+        ctx.setTrustedCertificatesBytes(
+            data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
+        _caContext = ctx;
+      } catch (_) {
+        _caContext = null;
+      }
+    }
     return EasyLabClient(baseUrl: baseUrl, token: token);
-  }
-
-  String get _authHeader {
-    return token.isNotEmpty ? 'Bearer $token' : '';
   }
 
   // ---- agent: sessions ----
