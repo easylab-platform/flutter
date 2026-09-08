@@ -47,7 +47,7 @@ class _TimelineOverlayState extends State<TimelineOverlay> {
       return;
     }
     try {
-      final c = await store.api.changes(sid);
+      final c = await store.api.changesFor(store.sessionById(sid));
       if (mounted) setState(() => _changes = c);
     } catch (_) {}
   }

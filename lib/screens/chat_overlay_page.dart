@@ -69,8 +69,6 @@ class _ChatOverlayPageWidgetState extends State<ChatOverlayPageWidget> {
         return context.l10n.mailbox;
       case SessionOverlay.container:
         return context.l10n.container;
-      case SessionOverlay.todos:
-        return context.l10n.todos;
     }
   }
 

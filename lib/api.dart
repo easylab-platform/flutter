@@ -286,14 +286,19 @@ class EasyLabApi {
     )).toList();
   }
 
-  Future<List<ChangeEntry>> changes(String id) async {
-    final j = await _get('/api/v1/sessions/${_enc(id)}/changes') as Map<String, dynamic>;
-    return _list(j, ChangeEntry.fromJson, 'changes');
-  }
-
-  Future<List<Todo>> todos(String id) async {
-    final j = await _get('/api/v1/sessions/${_enc(id)}/todos') as Map<String, dynamic>;
-    return _list(j, Todo.fromJson, 'todos');
+  /// Session's repo change log (the session maps to org:repo:branch). Uses
+  /// the easylab Lab Log RPC over the session's resolved workspace.
+  Future<List<ChangeEntry>> changesFor(Session? s) async {
+    if (s == null || s.org.isEmpty || s.repo.isEmpty) return const [];
+    final r = await _lab.log(sdk.LogRequest(
+        org: s.org, repo: s.repo, ref: s.branch, limit: 50));
+    return r.commits.map((c) => ChangeEntry(
+      changeId: c.changeId,
+      commitId: c.commitId,
+      author: c.author,
+      timestamp: c.timestamp,
+      message: c.message,
+    )).toList();
   }
 
   // ---- stream (SSE) ----

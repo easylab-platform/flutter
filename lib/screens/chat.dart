@@ -95,7 +95,7 @@ class _ChatSessionPageState extends State<ChatSessionPageWidget> {
     final m = MessagesController(
         api: store.api, getSessionId: () => sid);
     m.onSessionEvent((event, params) {
-      if (event == 'todos-updated' || event == 'turn-complete') {
+      if (event == 'turn-complete') {
         store.bumpSessionRevision();
       }
       if (event == 'tool-result' && params['change_id'] is String) {
@@ -475,9 +475,8 @@ class _ChatSessionPageState extends State<ChatSessionPageWidget> {
                   PopupMenuItem(value: 'timeline', child: Text(context.l10n.timeline)),
                   PopupMenuItem(value: 'files', child: Text(context.l10n.files)),
                   PopupMenuItem(value: 'mailbox', child: Text(context.l10n.mailbox)),
-                  PopupMenuItem(value: 'container', child: Text(context.l10n.container)),
-                  PopupMenuItem(value: 'todos', child: Text(context.l10n.todos)),
-                  const PopupMenuDivider(),
+                   PopupMenuItem(value: 'container', child: Text(context.l10n.container)),
+                   const PopupMenuDivider(),
                   PopupMenuItem(
                     value: 'delete',
                     child: Text(context.l10n.deleteSession,
@@ -506,8 +505,6 @@ class _ChatSessionPageState extends State<ChatSessionPageWidget> {
         _openOverlay(SessionOverlay.mailbox);
       case 'container':
         _openOverlay(SessionOverlay.container);
-      case 'todos':
-        _openOverlay(SessionOverlay.todos);
       case 'delete':
         _deleteSession();
     }

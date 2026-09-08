@@ -5,4 +5,4 @@ library;
 
 enum SiderTab { chat, code, containers, config }
 
-enum SessionOverlay { timeline, files, mailbox, container, todos }
+enum SessionOverlay { timeline, files, mailbox, container }

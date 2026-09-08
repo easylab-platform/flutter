@@ -598,34 +598,6 @@ class FileCommit {
       );
 }
 
-class Todo {
-  final String id;
-  final String sessionId;
-  final String content;
-  final String status;
-  final String priority;
-  final int position;
-  final String createdAt;
-  Todo({
-    required this.id,
-    required this.sessionId,
-    required this.content,
-    required this.status,
-    required this.priority,
-    required this.position,
-    required this.createdAt,
-  });
-  factory Todo.fromJson(Map<String, dynamic> j) => Todo(
-        id: j['id'] as String? ?? '',
-        sessionId: j['sessionId'] as String? ?? '',
-        content: j['content'] as String? ?? '',
-        status: j['status'] as String? ?? '',
-        priority: j['priority'] as String? ?? '',
-        position: j['position'] as int? ?? 0,
-        createdAt: j['createdAt'] as String? ?? '',
-      );
-}
-
 /// Parse a `{locale: text}` map (from JSON) into a String->String map.
 Map<String, String> _mapStringString(dynamic v) {
   if (v is Map) {

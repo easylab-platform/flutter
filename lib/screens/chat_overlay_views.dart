@@ -30,8 +30,6 @@ class ChatOverlayViews extends StatelessWidget {
         return MailboxOverlay(store: store);
       case SessionOverlay.container:
         return ContainerOverlay(store: store);
-      case SessionOverlay.todos:
-        return TodosOverlay(store: store);
     }
   }
 }
