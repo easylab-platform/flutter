@@ -1,15 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 
 import 'package:easylab_client_sdk/easylab_client_sdk.dart' as sdk;
-import 'package:connectrpc/connect.dart' as connect;
-import 'package:protobuf/protobuf.dart' as protobuf;
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart' as wkt;
 
 import 'models.dart';
@@ -120,15 +116,6 @@ class EasyLabApi {
 
   Future<dynamic> _post(String path, [Object? body]) async {
     final r = await client.post(
-      _u(path),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(r);
-  }
-
-  Future<dynamic> _patch(String path, Object? body) async {
-    final r = await client.patch(
       _u(path),
       headers: _headers,
       body: body == null ? null : jsonEncode(body),
@@ -445,15 +432,6 @@ class EasyLabApi {
     )).toList();
   }
 
-  Future<String> fileDiff(
-      String org, String repo, String changeId, String filePath) async {
-    final j = await _get(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/file-diff/${_enc(changeId)}',
-      {'path': filePath},
-    ) as Map<String, dynamic>;
-    return j['diff'] as String? ?? '';
-  }
-
   Future<List<FileCommit>> log(String org, String repo,
       {String? rev, int? limit}) async {
     final r = await _lab.log(sdk.LogRequest(
@@ -562,14 +540,6 @@ class EasyLabApi {
 
   // ---- config / providers / models / presets / tools ----
 
-  Future<Map<String, String>> config() async {
-    final j = await _get('/api/v1/config') as Map<String, dynamic>;
-    return j.map((k, v) => MapEntry(k, v.toString()));
-  }
-
-  Future<void> setConfig(Map<String, String> entries) =>
-      _put('/api/v1/config', entries);
-
   Future<Map<String, ProviderInfo>> providers() async {
     final r = await _agent.listProviders(sdk.ListProvidersRequest());
     final out = <String, ProviderInfo>{};
@@ -657,6 +627,15 @@ class EasyLabApi {
         type: c.type,
         placeholder: '',
       )).toList(),
+      config: t.configFields.map((c) => ToolConfig(
+        name: c.name,
+        type: c.type,
+        enumValues: c.enumValues.toList(),
+        defaultValue: c.hasDefault_6() ? StructUtils.valueToJson(c.default_6) : null,
+        description: c.description,
+        scope: c.scope,
+      )).toList(),
+      requiredConfig: t.requiredConfig.toList(),
     )).toList();
   }
 
@@ -673,11 +652,6 @@ class EasyLabApi {
     return r.config.values
         .map((k, v) => MapEntry(k, StructUtils.valueToJson(v)));
   }
-
-  // ---- infra ----
-
-  Future<Map<String, dynamic>> k8sConfig() async =>
-      await _get('/api/v1/infra/k8s/config') as Map<String, dynamic>;
 
   // ---- containers / ops ----
 
@@ -721,15 +695,6 @@ class EasyLabApi {
     )).toList();
   }
 
-  Future<List<DeploymentEvent>> deploymentEvents(String name) async {
-    final j = await _get('/api/v1/deployments/${_enc(name)}/events')
-        as Map<String, dynamic>;
-    return _list(j, DeploymentEvent.fromJson, 'events');
-  }
-
-  Future<void> restartDeployment(String name) =>
-      _post('/api/v1/deployments/${_enc(name)}/restart', null);
-
   Future<Map<String, dynamic>> deploymentStatus(String name) async {
     final r = await _ops.getService(sdk.GetServiceRequest(name: name));
     return {
@@ -770,12 +735,6 @@ class EasyLabApi {
     return OpsStatus(ok: r.ok, version: r.version, sandboxes: r.sandboxes);
   }
 
-  Future<List<ContainerfileTemplate>> containerfileTemplates() async {
-    final j = await _get('/api/v1/containerfile-templates')
-        as Map<String, dynamic>;
-    return _list(j, ContainerfileTemplate.fromJson, 'templates');
-  }
-
   Future<Map<String, dynamic>> buildImage(Map<String, dynamic> body) async {
     final r = await _ops.build(sdk.BuildRequest(
       org: body['org'] ?? '',
@@ -795,9 +754,6 @@ class EasyLabApi {
       required: p.required.toList(),
     )).toList();
   }
-
-  Future<Map<String, dynamic>> publishPackage(Map<String, dynamic> body) async =>
-      await _post('/api/v1/packages/publish', body) as Map<String, dynamic>;
 
   Future<List<JobInfo>> jobs(String session) async {
     final j = await _get('/api/v1/sandboxes/${_enc(session)}/jobs')
@@ -826,13 +782,6 @@ class EasyLabApi {
 
   Future<void> kill(String session, String jobId) =>
       _ops.sandboxJobKill(sdk.SandboxJobKillRequest(name: session, jobId: jobId));
-
-  Future<Map<String, dynamic>> jobOutput(
-      String session, String jobId, String stream, int start, int end) async =>
-      _get(
-        '/api/v1/sandboxes/${_enc(session)}/jobs/${_enc(jobId)}/output',
-        {'stream': stream, 'start': start, 'end': end},
-      ) as Map<String, dynamic>;
 
   // ---- packages ----
 
