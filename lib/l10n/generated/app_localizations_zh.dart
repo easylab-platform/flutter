@@ -894,43 +894,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get vlmModelLabel => '视觉模型';
 
   @override
-  String get tabWorksheets => '工单';
-
-  @override
-  String get allWorksheets => '全部';
-
-  @override
-  String get dispatched => '已执行';
-
-  @override
-  String get rejected => '已拒绝';
-
-  @override
-  String get approve => '批准';
-
-  @override
-  String get reject => '拒绝';
-
-  @override
-  String get noWorksheets => '暂无工单。';
-
-  @override
-  String get worksheetArgs => '工单内容';
-
-  @override
-  String worksheetDecideBody(String decision, String action, String session) {
-    return '确定$decision该工单？\n$action · $session';
-  }
-
-  @override
-  String get worksheetDecided => '已处理工单';
-
-  @override
-  String worksheetProposed(String action, String title) {
-    return '工单：$action（$title）';
-  }
-
-  @override
   String get configValueHint => '输入值后回车保存';
 
   @override

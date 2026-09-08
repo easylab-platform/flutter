@@ -65,11 +65,6 @@ class ContainersRootPage extends AppPage {
   const ContainersRootPage() : super('containers_root');
 }
 
-/// Worksheets tab — bottom of the stack (single page).
-class WorksheetsRootPage extends AppPage {
-  const WorksheetsRootPage() : super('worksheets_root');
-}
-
 /// Config tab — bottom of the stack (settings list).
 class ConfigRootPage extends AppPage {
   const ConfigRootPage() : super('config_root');
@@ -86,6 +81,5 @@ AppPage rootPageFor(SiderTab tab) => switch (tab) {
       SiderTab.chat => const ChatListPage(),
       SiderTab.code => const CodeRootPage(),
       SiderTab.containers => const ContainersRootPage(),
-      SiderTab.worksheets => const WorksheetsRootPage(),
       SiderTab.config => const ConfigRootPage(),
     };

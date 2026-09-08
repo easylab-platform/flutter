@@ -9,7 +9,6 @@ import 'page_builder.dart';
 import 'prefs.dart';
 import 'store.dart';
 import 'theme/app_theme.dart';
-import 'screens/config.dart';
 
 const defaultBaseUrl = 'https://platform.easylab.10.199.64.20.nip.io';
 
@@ -257,7 +256,6 @@ class _Shell extends StatelessWidget {
     (SiderTab.chat, Icons.chat_bubble_outline, 'tabChat'),
     (SiderTab.code, Icons.folder_copy_outlined, 'tabCode'),
     (SiderTab.containers, Icons.inventory_2_outlined, 'tabContainers'),
-    (SiderTab.worksheets, Icons.assignment_outlined, 'tabWorksheets'),
     (SiderTab.config, Icons.settings_outlined, 'tabConfig'),
   ];
 

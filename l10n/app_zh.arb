@@ -557,40 +557,6 @@
   "showMore": "展开",
   "showLess": "收起",
   "vlmModelLabel": "视觉模型",
-  "@worksheetProposed": {
-    "placeholders": {
-      "action": {
-        "type": "String"
-      },
-      "title": {
-        "type": "String"
-      }
-    }
-  },
-  "@worksheetDecideBody": {
-    "placeholders": {
-      "decision": {
-        "type": "String"
-      },
-      "action": {
-        "type": "String"
-      },
-      "session": {
-        "type": "String"
-      }
-    }
-  },
-  "tabWorksheets": "工单",
-  "allWorksheets": "全部",
-  "dispatched": "已执行",
-  "rejected": "已拒绝",
-  "approve": "批准",
-  "reject": "拒绝",
-  "noWorksheets": "暂无工单。",
-  "worksheetArgs": "工单内容",
-  "worksheetDecideBody": "确定{decision}该工单？\n{action} · {session}",
-  "worksheetDecided": "已处理工单",
-  "worksheetProposed": "工单：{action}（{title}）",
   "configValueHint": "输入值后回车保存",
   "systemPresetBadge": "系统",
   "readOnlyPreset": "系统预设：只读，不可编辑",

@@ -899,43 +899,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get vlmModelLabel => 'Vision model';
 
   @override
-  String get tabWorksheets => 'Worksheets';
-
-  @override
-  String get allWorksheets => 'All';
-
-  @override
-  String get dispatched => 'Dispatched';
-
-  @override
-  String get rejected => 'Rejected';
-
-  @override
-  String get approve => 'Approve';
-
-  @override
-  String get reject => 'Reject';
-
-  @override
-  String get noWorksheets => 'No worksheets.';
-
-  @override
-  String get worksheetArgs => 'Worksheet payload';
-
-  @override
-  String worksheetDecideBody(String decision, String action, String session) {
-    return '$decision this worksheet?\n$action · $session';
-  }
-
-  @override
-  String get worksheetDecided => 'Worksheet decided';
-
-  @override
-  String worksheetProposed(String action, String title) {
-    return 'Worksheet: $action ($title)';
-  }
-
-  @override
   String get configValueHint => 'Enter to save';
 
   @override

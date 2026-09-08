@@ -3,6 +3,6 @@
 /// without an import cycle.
 library;
 
-enum SiderTab { chat, code, containers, worksheets, config }
+enum SiderTab { chat, code, containers, config }
 
 enum SessionOverlay { timeline, files, mailbox, container, todos }

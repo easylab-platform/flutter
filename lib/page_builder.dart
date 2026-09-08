@@ -10,7 +10,6 @@ import 'screens/code_repo_page.dart';
 import 'screens/code_file_page.dart';
 import 'screens/config.dart';
 import 'screens/containers.dart';
-import 'screens/worksheets.dart';
 
 /// Build the widget for a single [AppPage]. [isTablet] lets a page render its
 /// own back affordance only when it is the *current* (top) page of the last-two
@@ -42,8 +41,6 @@ Widget buildPage(AppStore store, AppPage page,
           store: store, darkMode: darkMode, onDarkMode: onDarkMode, onSwitchBackend: onSwitchBackend, initialId: id);
     case ContainersRootPage():
       return ContainersScreen(store: store);
-    case WorksheetsRootPage():
-      return WorksheetsScreen(store: store);
   }
 }
 

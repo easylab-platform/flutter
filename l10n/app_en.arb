@@ -557,40 +557,6 @@
   "showMore": "Show",
   "showLess": "Collapse",
   "vlmModelLabel": "Vision model",
-  "@worksheetProposed": {
-    "placeholders": {
-      "action": {
-        "type": "String"
-      },
-      "title": {
-        "type": "String"
-      }
-    }
-  },
-  "@worksheetDecideBody": {
-    "placeholders": {
-      "decision": {
-        "type": "String"
-      },
-      "action": {
-        "type": "String"
-      },
-      "session": {
-        "type": "String"
-      }
-    }
-  },
-  "tabWorksheets": "Worksheets",
-  "allWorksheets": "All",
-  "dispatched": "Dispatched",
-  "rejected": "Rejected",
-  "approve": "Approve",
-  "reject": "Reject",
-  "noWorksheets": "No worksheets.",
-  "worksheetArgs": "Worksheet payload",
-  "worksheetDecideBody": "{decision} this worksheet?\n{action} · {session}",
-  "worksheetDecided": "Worksheet decided",
-  "worksheetProposed": "Worksheet: {action} ({title})",
   "configValueHint": "Enter to save",
   "systemPresetBadge": "System",
   "readOnlyPreset": "System preset: read-only",
