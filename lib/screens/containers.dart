@@ -6,6 +6,7 @@ import '../models.dart';
 import '../store.dart';
 import '../theme/app_theme.dart';
 import 'container_overlay.dart';
+import '../widgets/chat_avatar.dart';
 import '../widgets/dialogs.dart';
 
 /// Recreates ContainersPage.svelte (sandboxes + deployments; terminal
@@ -47,11 +48,15 @@ class _ContainersScreenState extends State<ContainersScreen> {
 
   Future<void> _destroySandbox(Sandbox s) async {
     final ok = await confirmDialog(context,
-        title: t(context, 'deleteSandboxTitle'),
-        description: t(context, 'deleteSandboxBody', [s.podName]));
+        title: context.l10n.deleteSandboxTitle,
+        description: context.l10n.deleteSandboxBody(s.podName));
     if (!ok) return;
+    // Always address the worker by its container id (pod short name): it is
+    // a stable, non-empty k8s label value that `labelKey` passes through
+    // verbatim. The `session` field may be empty (no easylab/session annotation),
+    // which would otherwise 404 on `DELETE /sandboxes/`.
     try {
-      await store.api.destroySandbox(s.session);
+      await store.api.destroySandbox(s.containerId);
     } catch (e) {
       _error = '$e';
       setState(() {});
@@ -61,8 +66,8 @@ class _ContainersScreenState extends State<ContainersScreen> {
 
   Future<void> _destroyDeployment(Deployment d) async {
     final ok = await confirmDialog(context,
-        title: t(context, 'deleteDeploymentTitle'),
-        description: t(context, 'deleteDeploymentBody', [d.name]));
+        title: context.l10n.deleteDeploymentTitle,
+        description: context.l10n.deleteDeploymentBody(d.name));
     if (!ok) return;
     try {
       await store.api.destroyDeployment(d.name);
@@ -79,52 +84,56 @@ class _ContainersScreenState extends State<ContainersScreen> {
     final text = textOf(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(t(context, 'containersTitle')),
+        title: Text(context.l10n.tabContainers),
         actions: [
           IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _load),
           IconButton(
               icon: const Icon(Icons.public_rounded),
-              tooltip: t(context, 'deployService'),
+              tooltip: context.l10n.deployService,
               onPressed: () => _deployDialog()),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              children: [
-                if (_error.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                    child: Text(_error,
-                        style: text.meta.copyWith(color: colors.destructive)),
-                  ),
-                Text(t(context, 'deployments'),
-                    style: text.meta
-                        .copyWith(fontWeight: FontWeight.w600, fontSize: 13)),
-                if (_deployments.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                    child: Text(t(context, 'noDeployments'),
-                        style: text.meta
-                            .copyWith(color: colors.mutedForeground)),
-                  )
-                else
-                  for (final d in _deployments) _deploymentCard(d),
-                const SizedBox(height: AppSpacing.lg),
-                Text(t(context, 'sandboxes'),
-                    style: text.meta
-                        .copyWith(fontWeight: FontWeight.w600, fontSize: 13)),
-                if (_sandboxes.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                    child: Text(t(context, 'noContainers'),
-                        style: text.meta
-                            .copyWith(color: colors.mutedForeground)),
-                  )
-                else
-                  for (final s in _sandboxes) _sandboxCard(s),
-              ],
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                children: [
+                  if (_error.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                      child: Text(_error,
+                          style: text.meta.copyWith(color: colors.destructive)),
+                    ),
+                  Text(context.l10n.deployments,
+                      style: text.meta
+                          .copyWith(fontWeight: FontWeight.w600, fontSize: 13)),
+                  if (_deployments.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                      child: Text(context.l10n.noDeployments,
+                          style: text.meta
+                              .copyWith(color: colors.mutedForeground)),
+                    )
+                  else
+                    for (final d in _deployments) _deploymentCard(d),
+                  const SizedBox(height: AppSpacing.lg),
+                  Text(context.l10n.sandboxes,
+                      style: text.meta
+                          .copyWith(fontWeight: FontWeight.w600, fontSize: 13)),
+                  if (_sandboxes.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                      child: Text(context.l10n.noContainers,
+                          style: text.meta
+                              .copyWith(color: colors.mutedForeground)),
+                    )
+                  else
+                    for (final s in _sandboxes) _sandboxCard(s),
+                ],
+              ),
             ),
     );
   }
@@ -152,7 +161,7 @@ class _ContainersScreenState extends State<ContainersScreen> {
                     : colors.destructive.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(999),
               ),
-              child: Text(t(context, 'ready', ['${d.ready}', '${d.replicas}']),
+              child: Text(context.l10n.ready('${d.ready}', '${d.replicas}'),
                   style: text.micro.copyWith(
                       color: d.ready > 0 ? colors.success : colors.destructive)),
             ),
@@ -170,14 +179,26 @@ class _ContainersScreenState extends State<ContainersScreen> {
   Widget _sandboxCard(Sandbox s) {
     final colors = colorsOf(context);
     final text = textOf(context);
+    // Session names are org:repo:branch — render the human-readable triple
+    // with an avatar instead of the hash-suffixed pod name.
+    final parts = s.session.split(':');
+    final (org, repo, branch) = parts.length == 3
+        ? (parts[0], parts[1], parts[2])
+        : ('', '', '');
     return Card(
       margin: const EdgeInsets.only(top: AppSpacing.sm),
       child: ListTile(
-        title: Text(s.podName, style: text.mono.copyWith(fontSize: 13)),
-        subtitle: Text(s.session,
-            maxLines: 1,
+        leading: org.isNotEmpty
+            ? ChatAvatar(org: org, repo: repo, branch: branch, radius: 20)
+            : null,
+        title: Text(branch.isNotEmpty ? branch : s.session,
+            style: text.meta.copyWith(fontWeight: FontWeight.w600)),
+        subtitle: Text(
+            org.isNotEmpty ? '$org/$repo\n${s.podName}' : s.podName,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: text.micro.copyWith(color: colors.mutedForeground)),
+        isThreeLine: org.isNotEmpty,
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -186,18 +207,19 @@ class _ContainersScreenState extends State<ContainersScreen> {
               height: 8,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: s.status == 'running'
+                color: s.status.toLowerCase() == 'running'
                     ? colors.success
-                    : s.status == 'starting'
+                    : s.status.toLowerCase() == 'starting'
                         ? colors.warning
                         : colors.destructive,
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
             TextButton(
-              onPressed:
-                  s.status != 'running' ? null : () => _openTerminal(s),
-              child: Text(t(context, 'terminal')),
+              onPressed: s.status.toLowerCase() != 'running'
+                  ? null
+                  : () => _openTerminal(s),
+              child: Text(context.l10n.terminal),
             ),
             IconButton(
               icon: Icon(Icons.delete_outline_rounded,
@@ -231,7 +253,7 @@ class _ContainersScreenState extends State<ContainersScreen> {
     final r = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(t(context, 'deployService')),
+        title: Text(context.l10n.deployService),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -239,40 +261,40 @@ class _ContainersScreenState extends State<ContainersScreen> {
               TextField(
                   controller: name,
                   decoration: InputDecoration(
-                      labelText: t(ctx, 'nameLabel'))),
+                      labelText: ctx.l10n.nameLabel)),
               const SizedBox(height: AppSpacing.sm),
               TextField(
                   controller: image,
                   decoration: InputDecoration(
-                      labelText: t(ctx, 'imageLabel'))),
+                      labelText: ctx.l10n.imageLabel)),
               const SizedBox(height: AppSpacing.sm),
               TextField(
                   controller: replicas,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
-                      labelText: t(ctx, 'replicasLabel'))),
+                      labelText: ctx.l10n.replicasLabel)),
               const SizedBox(height: AppSpacing.sm),
               TextField(
                   controller: port,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
-                      labelText: t(ctx, 'portLabel'))),
+                      labelText: ctx.l10n.portLabel)),
               const SizedBox(height: AppSpacing.sm),
               TextField(
                   controller: session,
                   decoration: InputDecoration(
-                      labelText: t(ctx, 'sessionOptLabel'))),
+                      labelText: ctx.l10n.sessionOptLabel)),
             ],
           ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: Text(t(ctx, 'cancel')),
+              child: Text(ctx.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(t(ctx, 'confirm')),
+            child: Text(ctx.l10n.confirm),
           ),
         ],
       ),

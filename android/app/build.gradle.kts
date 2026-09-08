@@ -27,6 +27,13 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Only 64-bit ARM. The jni native build (pulled by path_provider_android
+        // 2.3.1) only ships the aarch64 clang toolchain in this NDK; building the
+        // 32-bit armeabi target fails. Restricting to arm64 lets the build pass.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {

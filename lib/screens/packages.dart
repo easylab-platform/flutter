@@ -121,17 +121,21 @@ class _PackagesScreenState extends State<PackagesScreen> {
   }
 
   String _endpointFor(String type) =>
-      type == 'oci' ? '/v2/' : '/api/v1/packages/$type/';
+      type == 'oci' ? '/v2/' : '/pkgs/$type/';
 
-  /// Full URL for copy-paste (base gateway + endpoint path).
-  String _endpointUrl(String type) => '${store.api.baseUrl}${_endpointFor(type)}';
+  /// The externally usable registry host (jj-lab serves every protocol
+  /// under `/pkgs/<type>` plus OCI `/v2`). This is what a tool config
+  /// would point at.
+  static const _registryHost = 'https://jj-lab.temp.10.199.64.20.nip.io';
+
+  String _endpointUrl(String type) => '$_registryHost${_endpointFor(type)}';
 
   @override
   Widget build(BuildContext context) {
     final colors = colorsOf(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(t(context, 'packagesTitle')),
+        title: Text(context.l10n.packagesTitle),
         actions: [
           IconButton(
               icon: const Icon(Icons.refresh_rounded),
@@ -148,8 +152,8 @@ class _PackagesScreenState extends State<PackagesScreen> {
                     AppSpacing.lg, AppSpacing.sm),
             child: SegmentedButton<int>(
               segments: [
-                ButtonSegment(value: 0, label: Text(t(context, 'registries'))),
-                ButtonSegment(value: 1, label: Text(t(context, 'packagesTab'))),
+                ButtonSegment(value: 0, label: Text(context.l10n.registries)),
+                ButtonSegment(value: 1, label: Text(context.l10n.packagesTab)),
               ],
               selected: {_tab},
               showSelectedIcon: false,
@@ -203,13 +207,13 @@ class _PackagesScreenState extends State<PackagesScreen> {
                 ),
               TextField(
                 decoration: InputDecoration(
-                  hintText: t(context, 'filterEcosystems'),
+                  hintText: context.l10n.filterEcosystems,
                   prefixIcon: Icon(Icons.search_rounded),
                 ),
                 onChanged: (v) => setState(() => _query = v),
               ),
               const SizedBox(height: AppSpacing.md),
-              Text(t(context, 'proxyRegistries', ['${filtered.length}']),
+              Text(context.l10n.proxyRegistries('${filtered.length}'),
                   style: text.meta
                       .copyWith(fontWeight: FontWeight.w600, fontSize: 13)),
               const SizedBox(height: AppSpacing.sm),
@@ -220,28 +224,42 @@ class _PackagesScreenState extends State<PackagesScreen> {
                     title: Text(ty.type,
                         style: text.mono.copyWith(fontSize: 13)),
                     subtitle: Text(
-                        '${_typeLabels[ty.type] ?? ty.type} · ${ty.upstream.isEmpty ? t(context, 'noUpstreamLocal') : ty.upstream}\n${t(context, 'cachedPackages', ['${ty.packages}'])}',
+                        '${_typeLabels[ty.type] ?? ty.type} · ${ty.upstream.isEmpty ? context.l10n.noUpstreamLocal : ty.upstream}\n${context.l10n.cachedPackages('${ty.packages}')}',
                         style: text.micro
                             .copyWith(color: colors.mutedForeground)),
+                    trailing: IconButton(
+                      icon: Icon(Icons.copy_rounded,
+                          size: 16, color: colors.mutedForeground),
+                      tooltip: context.l10n.endpointCopied,
+                      onPressed: () {
+                        Clipboard.setData(
+                            ClipboardData(text: _endpointUrl(ty.type)));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content: Text(
+                                  '${_endpointUrl(ty.type)}  ·  ${context.l10n.endpointCopied}')),
+                        );
+                      },
+                    ),
                     onLongPress: () {
                       Clipboard.setData(
                           ClipboardData(text: _endpointUrl(ty.type)));
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                             content:
-                                Text(Texts.t(context, 'endpointCopied'))),
+                                Text(context.l10n.endpointCopied)),
                       );
                     },
                   ),
                 ),
               const SizedBox(height: AppSpacing.md),
-              Text(t(context, 'ociCatalog', ['${_repositories.length}']),
+              Text(context.l10n.ociCatalog('${_repositories.length}'),
                   style: text.meta
                       .copyWith(fontWeight: FontWeight.w600, fontSize: 13)),
               if (_repositories.isEmpty)
                 Padding(
                     padding: const EdgeInsets.all(AppSpacing.sm),
-                    child: Text(t(context, 'noImages'),
+                    child: Text(context.l10n.noImages,
                         style: text.meta
                             .copyWith(color: colors.mutedForeground)))
               else
@@ -270,7 +288,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
               Expanded(
                 child: TextField(
                   decoration: InputDecoration(
-                    hintText: t(context, 'searchPackages'),
+                    hintText: context.l10n.searchPackages,
                     prefixIcon: Icon(Icons.search_rounded),
                   ),
                   onChanged: (v) => _pkgQuery = v,
@@ -283,7 +301,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
               const SizedBox(width: AppSpacing.sm),
               DropdownButton<String>(
                 value: _typeFilter.isEmpty ? null : _typeFilter,
-                hint: Text(t(context, 'typeLabel'), style: text.meta),
+                hint: Text(context.l10n.typeLabel, style: text.meta),
                 underline: const SizedBox.shrink(),
                 items: [
                   for (final ty in _types.where((e) => e.type.isNotEmpty))
@@ -310,7 +328,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                   child: Text(
                       _pkgError.isNotEmpty
                           ? _pkgError
-                          : t(context, 'noPackagesYet'),
+                          : context.l10n.noPackagesYet,
                       style:
                           TextStyle(color: colors.mutedForeground)))
               : ListView.builder(
@@ -324,9 +342,10 @@ class _PackagesScreenState extends State<PackagesScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(I18n.isZh
-                  ? '${_offset + 1}–${_offset + _pkgs.length} / 共$_total'
-                  : '${_offset + 1}–${_offset + _pkgs.length} of $_total',
+              Text(context.l10n.packPageOf(
+                  '${_offset + 1}',
+                  '${_offset + _pkgs.length}',
+                  '$_total'),
                   style: text.micro.copyWith(color: colors.mutedForeground)),
               Row(
                 children: [
@@ -337,7 +356,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                             _offset = (_offset - _pageSize).clamp(0, _offset);
                             _loadPackages();
                           },
-                    child: Text(t(context, 'prev')),
+                    child: Text(context.l10n.prev),
                   ),
                   TextButton(
                     onPressed: _offset + _pageSize >= _total || _pkgLoading
@@ -346,7 +365,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                             _offset += _pageSize;
                             _loadPackages();
                           },
-                    child: Text(t(context, 'next')),
+                    child: Text(context.l10n.next),
                   ),
                 ],
               ),
@@ -373,7 +392,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
               color: colors.mutedForeground),
           title: Text(p.name, style: text.mono.copyWith(fontSize: 13)),
           subtitle: Text(
-              '${p.type}${p.latestVersion != null ? ' · v${p.latestVersion}' : ''} · ${t(context, 'versionsCount', ['${p.versions}'])}',
+              '${p.type}${p.latestVersion != null ? ' · v${p.latestVersion}' : ''} · ${context.l10n.versionsCount('${p.versions}')}',
               style: text.micro.copyWith(color: colors.mutedForeground)),
           trailing: IconButton(
             icon: Icon(Icons.delete_outline_rounded,
@@ -382,16 +401,16 @@ class _PackagesScreenState extends State<PackagesScreen> {
               final confirm = await showDialog<bool>(
                 context: context,
                 builder: (ctx) => AlertDialog(
-                  title: Text(t(ctx, 'deletePackage')),
+                  title: Text(ctx.l10n.deletePackage),
                   content: Text(
-                      t(ctx, 'deletePackageBody', [p.name, p.type])),
+                      ctx.l10n.deletePackageBody(p.name, p.type)),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: Text(t(ctx, 'cancel'))),
+                        child: Text(ctx.l10n.cancel)),
                     FilledButton(
                         onPressed: () => Navigator.pop(ctx, true),
-                        child: Text(t(ctx, 'delete'))),
+                        child: Text(ctx.l10n.delete)),
                   ],
                 ),
               );
@@ -413,7 +432,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
               children: [
                 for (final v in _versionDetail) _versionRow(p, v),
                 if (_versionDetail.isEmpty)
-                  Text(t(context, 'noVersions'),
+                  Text(context.l10n.noVersions,
                       style: text.micro.copyWith(color: colors.mutedForeground)),
               ],
             ),
@@ -435,7 +454,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
             children: [
               Text(v.version, style: text.mono.copyWith(fontSize: 12)),
               const SizedBox(width: AppSpacing.sm),
-              Text(t(context, 'downloads', ['${v.downloadCount}']),
+              Text(context.l10n.downloads('${v.downloadCount}'),
                   style: text.micro.copyWith(color: colors.mutedForeground)),
             ],
           ),

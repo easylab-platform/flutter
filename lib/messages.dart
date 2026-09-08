@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -11,7 +12,7 @@ import 'models.dart';
 class MessagesController extends ChangeNotifier {
   MessagesController({required this.api, required this.getSessionId});
 
-  final EasyLabClient api;
+  final EasyLabApi api;
   final String Function() getSessionId;
 
   List<ChatMessage> messages = [];
@@ -24,6 +25,20 @@ class MessagesController extends ChangeNotifier {
   int _nextSeq = 1000000;
   final List<void Function(String event, Map<String, dynamic> params)>
       _sessionListeners = [];
+
+  // Reconnect state (single long-lived SSE per active session, IM-style).
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  String? _subSid;
+
+  static const int _maxReconnectAttempts = 10;
+  static const Duration _initialReconnect = Duration(seconds: 1);
+  static const Duration _maxReconnect = Duration(seconds: 30);
+  // Idle probe cadence: refreshes the stream/server-side so a half-open
+  // connection is detected before the UI can get stuck.
+  static const Duration _idleProbeEvery = Duration(seconds: 30);
+  Timer? _idleProbeTimer;
+  DateTime _lastActivity = DateTime.now();
 
   List<ChatMessage> get sorted {
     final m = [...messages];
@@ -56,8 +71,16 @@ class MessagesController extends ChangeNotifier {
     _connect(sid);
   }
 
+  void _markActivity() {
+    _lastActivity = DateTime.now();
+  }
+
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _idleProbeTimer?.cancel();
+    _idleProbeTimer = null;
     _sub?.cancel();
     _sub = null;
     super.dispose();
@@ -83,6 +106,9 @@ class MessagesController extends ChangeNotifier {
       hasMore = more;
     } catch (_) {}
     loading = false;
+    // Safety net: if the stream missed the terminal event (drop / reconnect),
+    // converge sending -> idle so the UI never stays "running".
+    _syncIdle();
     notifyListeners();
   }
 
@@ -108,20 +134,86 @@ class MessagesController extends ChangeNotifier {
   }
 
   void _connect(String sid) {
+    // Single long-lived SSE per active session (IM-style). Cancel any prior
+    // stream + reconnect timers before opening the new one so a rapid
+    // session switch never leaves a duplicate connection behind.
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _sub?.cancel();
-    _sub = api.streamEvents(sid).listen(_handleEvent,
-        onError: (_) {}, onDone: () {});
+    _sub = null;
+    _subSid = sid;
+    _reconnectAttempt = 0;
+    _lastActivity = DateTime.now();
+    _idleProbeTimer?.cancel();
+    _sub = api.streamEvents(sid).listen(
+      _handleEvent,
+      onError: (_) => _onStreamClosed(sid),
+      onDone: () => _onStreamClosed(sid),
+      cancelOnError: false,
+    );
+    _startIdleProbe();
+  }
+
+  /// One stream closed (done/error). If it's still the active session, re-arm
+  /// the SSE with exponential backoff and re-sync the conversation state so a
+  /// half-open connection never leaves the UI stuck.
+  void _onStreamClosed(String sid) {
+    // Defensive: a stale/closed stream for a previous session must not touch
+    // the current one's state.
+    if (_subSid != null && _subSid != sid) return;
+    _syncIdle();
+    if (sid != getSessionId()) return;
+    if (_reconnectAttempt >= _maxReconnectAttempts) return;
+    final delay = _initialReconnect * pow(2, _reconnectAttempt).toInt();
+    final capped = delay > _maxReconnect ? _maxReconnect : delay;
+    _reconnectAttempt++;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(capped, () => _connect(sid));
+  }
+
+  void _startIdleProbe() {
+    _idleProbeTimer?.cancel();
+    _idleProbeTimer = Timer.periodic(_idleProbeEvery, (_) {
+      if (DateTime.now().difference(_lastActivity) < _idleProbeEvery) return;
+      // No events for a while: poke the session state so a half-open server
+      // connection is detected / the server re-emits a status.
+      api.state(getSessionId()).then((r) {
+        final (st, _) = r;
+        if (st == 'busy' || st == 'running') {
+          sending = true;
+          notifyListeners();
+        }
+      }).catchError((_) {});
+    });
+  }
+
+  /// Converge to idle if the stream ended without a terminal `status idle` /
+  /// `turn-complete`. The backend sends both; a dropped/reconnected stream is
+  /// the only path that could leave `sending` stuck true.
+  void _syncIdle() {
+    if (!sending) return;
+    _finishStreaming();
+    notifyListeners();
   }
 
   void _handleEvent(StreamEvent ev) {
+    _markActivity();
     for (final cb in _sessionListeners) {
       try {
         cb(ev.event, ev.params);
       } catch (_) {}
     }
-    final event = ev.event;
-    final params = ev.params;
-    switch (event) {
+        final event = ev.event;
+        final params = ev.params;
+        // A worksheet proposal surfaces as a system notification in the chat
+        // stream (approve/reject lives in the Worksheets tab).
+        if (event == 'worksheet-proposed') {
+          _addSystem(I18n.now.worksheetProposed(
+            (params['action'] ?? params['title'] ?? '').toString(),
+            (params['title'] ?? '').toString(),
+          ));
+        }
+        switch (event) {
       case 'step-start':
       case 'text-start':
       case 'reasoning-start':
@@ -346,29 +438,62 @@ class MessagesController extends ChangeNotifier {
     _streamingId = null;
   }
 
-  Future<void> send(String text) async {
+  /// A system notification message (e.g. a worksheet proposal), rendered as
+  /// a centered system bubble.
+  void _addSystem(String text) {
+    messages = [
+      ...messages,
+      ChatMessage(
+          id: 'sys${DateTime.now().microsecondsSinceEpoch}',
+          role: 'system',
+          status: 'complete',
+          parts: [ChatPart(id: 'p${DateTime.now().microsecondsSinceEpoch}', type: 'text', text: text)],
+          createdAt: DateTime.now().toIso8601String(),
+          seq: _allocSeq()),
+    ];
+    notifyListeners();
+  }
+
+  Future<void> send(String text, [List<UploadedFile> attachments = const []]) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty || sending) return;
+    if ((trimmed.isEmpty && attachments.isEmpty) || sending) return;
     sending = true;
+    // The platform splices attachment codes into `[附件 …file:<code>…]`
+    // references; the client only sends the codes, never the rendered text.
+    final codes = attachments.map((a) => a.code).toList();
+    // Optimistic user message: file parts first (rendered as attachments),
+    // then the text. Mirrors how the backend persists them.
+    final userParts = <ChatPart>[
+      for (final a in attachments)
+        ChatPart(
+          id: 'f${a.code}',
+          type: 'file',
+          code: a.code,
+          name: a.name,
+          mime: a.mime,
+          size: a.size,
+        ),
+      if (trimmed.isNotEmpty)
+        ChatPart(
+          id: 'p${DateTime.now().microsecondsSinceEpoch}',
+          type: 'text',
+          text: trimmed),
+    ];
     messages = [
       ...messages.where((m) => m.status != 'streaming'),
       ChatMessage(
           id: 'u${DateTime.now().microsecondsSinceEpoch}',
           role: 'user',
           status: 'pending',
-          parts: [
-            ChatPart(
-                id: 'p${DateTime.now().microsecondsSinceEpoch}',
-                type: 'text',
-                text: trimmed)
-          ],
+          parts: userParts,
           createdAt: DateTime.now().toIso8601String(),
           seq: _allocSeq()),
     ];
     final _ = _ensureStreamingMsg(true);
     notifyListeners();
     try {
-      final messageId = await api.prompt(getSessionId(), trimmed);
+      final messageId =
+          await api.prompt(getSessionId(), trimmed, attachments: codes);
       if (messageId.isNotEmpty) {
         messages = messages.map((m) {
           if (m.status == 'pending' && m.role == 'user') {
@@ -381,7 +506,7 @@ class MessagesController extends ChangeNotifier {
     } catch (e) {
       _addError(e is ApiException
           ? e.toString()
-          : Texts.tr('sendFailed', ['$e']));
+          : I18n.now.sendFailed('$e'));
       sending = false;
       notifyListeners();
     }
@@ -392,20 +517,16 @@ class MessagesController extends ChangeNotifier {
   }
 
   Future<void> revert(String messageId) async {
-    final current = sorted;
     if (sending) {
       await api.interrupt(getSessionId());
     }
+    // Undo moves the backend tip back (append-only chain). Re-fetch the whole
+    // chain rather than locally truncating: the server is authoritative and
+    // re-reading it avoids resurrecting withdrawn messages or racing a
+    // mid-stream turn.
     await api.revert(getSessionId(), messageId);
-    final idx = current.indexWhere((m) => m.id == messageId);
-    final keep = idx >= 0 ? current.sublist(0, idx) : current;
-    messages = keep
-        .map((m) =>
-            m.status == 'streaming' ? m.copyWith(status: 'complete') : m)
-        .toList();
     _streamingId = null;
     sending = false;
-    notifyListeners();
     await _fetchMessages();
   }
 
@@ -463,6 +584,10 @@ ChatMessage _toChat(Message m, int i) {
           text: p.text ?? '',
           tool: p.tool ?? '',
           state: p.state,
+          code: p.code,
+          name: p.name,
+          mime: p.mime,
+          size: p.size,
         ),
     ],
   );

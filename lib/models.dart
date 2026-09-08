@@ -2,6 +2,8 @@
 /// gateway-go/web/schema.
 library;
 
+import 'dart:convert';
+
 // ---- enums / roles ----
 
 const kSessionRoles = [
@@ -28,6 +30,7 @@ class Session {
   final String? tipId;
   final int? maxTurns;
   final String? systemPrompt;
+  final String? locale;
   final int? inputTokens;
   final int? outputTokens;
   final int? totalTokens;
@@ -49,6 +52,7 @@ class Session {
     this.tipId,
     this.maxTurns,
     this.systemPrompt,
+    this.locale,
     this.inputTokens,
     this.outputTokens,
     this.totalTokens,
@@ -61,40 +65,28 @@ class Session {
     this.lastMessagePreview = '',
   });
 
-  factory Session.fromJson(Map<String, dynamic> j) {
-    final id = j['id'] as String? ?? j['name'] as String? ?? '';
-    var org = j['org'] as String? ?? '';
-    var repo = j['repo'] as String? ?? '';
-    var branch = j['branch'] as String? ?? '';
-    // Sessions created via adoptSession encode org-repo-branch in the name.
-    final segs = id.split('-');
-    if (org.isEmpty && repo.isEmpty && segs.length >= 3) {
-      org = segs[0];
-      repo = segs[1];
-      branch = segs.sublist(2).join('-');
-    }
-    return Session(
-      id: id,
-      org: org,
-      repo: repo,
-      branch: branch,
-      model: j['model'] as String? ?? '',
-      preset: j['preset'] as String? ?? '',
-      tipId: j['tip_id'] as String?,
-      maxTurns: j['max_turns'] as int?,
-      systemPrompt: j['system_prompt'] as String?,
-      inputTokens: j['input_tokens'] as int?,
-      outputTokens: j['output_tokens'] as int?,
-      totalTokens: j['total_tokens'] as int?,
-      lastInputTokens: j['last_input_tokens'] as int?,
-      lastOutputTokens: j['last_output_tokens'] as int?,
-      createdAt: j['created_at'] as String? ?? '',
-      updatedAt: j['updated_at'] as String? ?? '',
-      unreadCount: j['unread_count'] as int?,
-      lastMessageAt: j['last_message_at'] as String? ?? '',
-      lastMessagePreview: j['last_message_preview'] as String? ?? '',
-    );
-  }
+  factory Session.fromJson(Map<String, dynamic> j) => Session(
+        id: j['id'] as String? ?? '',
+        org: j['org'] as String? ?? '',
+        repo: j['repo'] as String? ?? '',
+        branch: j['branch'] as String? ?? '',
+        model: j['model'] as String? ?? '',
+        preset: j['preset'] as String? ?? '',
+        locale: j['locale'] as String?,
+        tipId: j['tip_id'] as String?,
+        maxTurns: j['max_turns'] as int?,
+        systemPrompt: j['system_prompt'] as String?,
+        inputTokens: j['input_tokens'] as int?,
+        outputTokens: j['output_tokens'] as int?,
+        totalTokens: j['total_tokens'] as int?,
+        lastInputTokens: j['last_input_tokens'] as int?,
+        lastOutputTokens: j['last_output_tokens'] as int?,
+        createdAt: j['created_at'] as String? ?? '',
+        updatedAt: j['updated_at'] as String? ?? '',
+        unreadCount: j['unread_count'] as int?,
+        lastMessageAt: j['last_message_at'] as String? ?? '',
+        lastMessagePreview: j['last_message_preview'] as String? ?? '',
+      );
 
   String get sessionName =>
       org.isNotEmpty ? '$org:$repo:$branch' : id;
@@ -136,6 +128,7 @@ class SessionInfo {
   final int? unread;
   final String model;
   final String preset;
+  final String? locale;
 
   SessionInfo({
     required this.sessionId,
@@ -144,6 +137,7 @@ class SessionInfo {
     this.unread,
     this.model = '',
     this.preset = '',
+    this.locale,
   });
 
   factory SessionInfo.fromJson(Map<String, dynamic> j) => SessionInfo(
@@ -153,6 +147,7 @@ class SessionInfo {
         unread: j['unread'] as int?,
         model: j['model'] as String? ?? '',
         preset: j['preset'] as String? ?? '',
+        locale: j['locale'] as String?,
       );
 }
 
@@ -269,12 +264,17 @@ class ToolState {
 
 class MessagePart {
   final String id;
-  final String type; // text | reasoning | tool | compaction | ...
+  final String type; // text | reasoning | tool | compaction | file | ...
   final String? text;
   final String? tool;
   final String? toolCallId;
   final ToolState? state;
   final Map<String, dynamic>? metadata;
+  // Attachment fields (type == 'file')
+  final String? code;
+  final String? name;
+  final String? mime;
+  final int? size;
 
   MessagePart({
     required this.id,
@@ -284,6 +284,10 @@ class MessagePart {
     this.toolCallId,
     this.state,
     this.metadata,
+    this.code,
+    this.name,
+    this.mime,
+    this.size,
   });
 
   factory MessagePart.fromJson(Map<String, dynamic> j) => MessagePart(
@@ -296,6 +300,10 @@ class MessagePart {
             ? null
             : ToolState.fromJson(j['state'] as Map<String, dynamic>),
         metadata: (j['metadata'] as Map?)?.cast<String, dynamic>(),
+        code: j['code'] as String?,
+        name: j['name'] as String?,
+        mime: j['mime'] as String?,
+        size: j['size'] as int?,
       );
 
   MessagePart copyWith({
@@ -311,6 +319,10 @@ class MessagePart {
         toolCallId: toolCallId,
         state: state ?? this.state,
         metadata: metadata,
+        code: code,
+        name: name,
+        mime: mime,
+        size: size,
       );
 }
 
@@ -327,23 +339,92 @@ class Message {
     this.createdAt,
   });
 
-  factory Message.fromJson(Map<String, dynamic> j) {
-    var parts = (j['parts'] as List? ?? [])
-        .map((e) => MessagePart.fromJson(e as Map<String, dynamic>))
-        .toList();
-    final content = j['content'] as String?;
-    if (parts.isEmpty && content != null && content.isNotEmpty) {
-      parts = [
-        MessagePart(id: j['id'] as String? ?? '', type: 'text', text: content)
-      ];
-    }
-    return Message(
-      id: j['id'] as String? ?? '',
-      role: j['role'] as String? ?? '',
-      parts: parts,
-      createdAt: j['created_at'] as String?,
-    );
-  }
+  factory Message.fromJson(Map<String, dynamic> j) => Message(
+        id: j['id'] as String? ?? '',
+        role: j['role'] as String? ?? '',
+        parts: (j['parts'] as List? ?? [])
+            .map((e) => MessagePart.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        createdAt: j['created_at'] as String?,
+      );
+}
+
+// ---- attachment upload / download ----
+
+/// A file the user picked to attach to a message, before upload.
+class UploadedFileSource {
+  final String path;
+  final String name;
+  final String mimeType;
+  UploadedFileSource({
+    required this.path,
+    required this.name,
+    required this.mimeType,
+  });
+}
+
+/// The server-side record for an uploaded file. The [code] is the 8-char
+/// content hash-based object key; the model refers to it as `file:<code>`.
+/// Also mirrors a LOCAL pending attachment (uploading/error) before the code
+/// exists — [localPath] lets an image show its thumbnail while uploading.
+class UploadedFile {
+  final String code;
+  final String? name;
+  final String? mime;
+  final int? size;
+  final String? sha256;
+  final bool deduped;
+  final String localPath;
+  final String uploadState; // 'idle' | 'uploading' | 'done' | 'error'
+  final String? error;
+  UploadedFile({
+    required this.code,
+    this.name,
+    this.mime,
+    this.size,
+    this.sha256,
+    this.deduped = false,
+    this.localPath = '',
+    this.uploadState = 'done',
+    this.error,
+  });
+
+  UploadedFile uploading(String srcPath) => UploadedFile(
+      code: code,
+      name: name,
+      mime: mime,
+      size: size,
+      sha256: sha256,
+      deduped: deduped,
+      localPath: srcPath,
+      uploadState: 'uploading');
+
+  UploadedFile uploadError(String msg) => UploadedFile(
+      code: code,
+      name: name,
+      mime: mime,
+      size: size,
+      sha256: sha256,
+      deduped: deduped,
+      localPath: localPath,
+      uploadState: 'error',
+      error: msg);
+
+  bool get isUploading => uploadState == 'uploading';
+  bool get hasError => uploadState == 'error';
+  bool get isLocal => code.isEmpty;
+
+  factory UploadedFile.fromJson(Map<String, dynamic> j) => UploadedFile(
+        code: j['code'] as String? ?? '',
+        name: j['name'] as String?,
+        mime: j['mime'] as String?,
+        size: (j['size'] as num?)?.toInt(),
+        sha256: j['hash'] as String?,
+        deduped: j['deduped'] as bool? ?? false,
+      );
+
+  /// The file code the client sends to the platform, which splices it into a
+  /// `[附件 …file:<code>…]` reference. The client never renders the text.
 }
 
 // ---- chat domain (streaming state) ----
@@ -354,6 +435,11 @@ class ChatPart {
   final String text;
   final String tool;
   final ToolState? state;
+  // Attachment fields (type == 'file')
+  final String? code;
+  final String? name;
+  final String? mime;
+  final int? size;
 
   ChatPart({
     required this.id,
@@ -361,6 +447,10 @@ class ChatPart {
     this.text = '',
     this.tool = '',
     this.state,
+    this.code,
+    this.name,
+    this.mime,
+    this.size,
   });
 
   ChatPart copyWith({String? text, ToolState? state, String? type, String? tool}) =>
@@ -370,6 +460,10 @@ class ChatPart {
         text: text ?? this.text,
         tool: tool ?? this.tool,
         state: state ?? this.state,
+        code: code,
+        name: name,
+        mime: mime,
+        size: size,
       );
 }
 
@@ -466,9 +560,8 @@ class FileEntry {
   });
   factory FileEntry.fromJson(Map<String, dynamic> j) => FileEntry(
         name: j['name'] as String? ?? '',
-        path: j['path'] as String? ?? (j['name'] as String? ?? ''),
-        isDir: (j['is_dir'] as bool?) ??
-            ((j['kind'] as String?) == 'tree' || (j['kind'] as String?) == 'dir'),
+        path: j['path'] as String? ?? '',
+        isDir: j['is_dir'] as bool? ?? false,
         size: j['size'] as int? ?? 0,
       );
 }
@@ -497,12 +590,11 @@ class FileCommit {
     required this.message,
   });
   factory FileCommit.fromJson(Map<String, dynamic> j) => FileCommit(
-        changeId: j['change_id'] as String? ?? j['revision_id'] as String? ?? '',
-        commitId: j['commit_id'] as String? ?? j['revision_id'] as String? ?? '',
+        changeId: j['change_id'] as String? ?? '',
+        commitId: j['sha'] as String? ?? j['commit_id'] as String? ?? '',
         author: j['author'] as String? ?? '',
-        timestamp: j['timestamp'] as String? ??
-            ((j['created_ms'] as int?)?.toString() ?? ''),
-        message: j['message'] as String? ?? j['description'] as String? ?? '',
+        timestamp: j['timestamp'] as String? ?? '',
+        message: j['description'] as String? ?? j['message'] as String? ?? '',
       );
 }
 
@@ -534,23 +626,52 @@ class Todo {
       );
 }
 
+/// Parse a `{locale: text}` map (from JSON) into a String->String map.
+Map<String, String> _mapStringString(dynamic v) {
+  if (v is Map) {
+    return v.map((k, val) => MapEntry('$k', '$val'));
+  }
+  // system_prompt_i18n may arrive as a JSON string.
+  if (v is String && v.isNotEmpty && v != '{}') {
+    try {
+      final m = jsonDecode(v);
+      if (m is Map) {
+        return m.map((k, val) => MapEntry('$k', '$val'));
+      }
+    } catch (_) {}
+  }
+  return const {};
+}
+
 class Preset {
   final String id;
   final String systemPrompt;
+  final Map<String, String> systemPromptI18n;
   final List<String> tools;
   final int maxTurns;
+  final bool isSystem;
   Preset({
     required this.id,
     required this.systemPrompt,
+    this.systemPromptI18n = const {},
     required this.tools,
     required this.maxTurns,
+    this.isSystem = false,
   });
   factory Preset.fromJson(Map<String, dynamic> j) => Preset(
         id: j['id'] as String? ?? '',
         systemPrompt: j['system_prompt'] as String? ?? '',
+        systemPromptI18n: _mapStringString(j['system_prompt_i18n']),
         tools: (j['tools'] as List? ?? []).map((e) => e.toString()).toList(),
         maxTurns: j['max_turns'] as int? ?? 30,
+        isSystem: j['is_system'] as bool? ?? false,
       );
+  /// The system prompt localized for [locale] ('zh'/'en'), falling back to the
+  /// default prompt when the locale has no translation.
+  String localizedPrompt(String locale) {
+    if (systemPromptI18n.containsKey(locale)) return systemPromptI18n[locale]!;
+    return systemPrompt;
+  }
   Map<String, dynamic> toJson() => {
         'id': id,
         'system_prompt': systemPrompt,
@@ -587,12 +708,16 @@ class ToolInfo {
   final String category;
   final Map<String, dynamic>? parameters;
   final List<ToolConfigField>? configFields;
+  final List<ToolConfig>? config;
+  final List<String> requiredConfig;
   ToolInfo({
     required this.name,
     required this.description,
     required this.category,
     this.parameters,
     this.configFields,
+    this.config,
+    this.requiredConfig = const [],
   });
   factory ToolInfo.fromJson(Map<String, dynamic> j) => ToolInfo(
         name: j['name'] as String? ?? '',
@@ -602,7 +727,104 @@ class ToolInfo {
         configFields: (j['configFields'] as List? ?? [])
             .map((e) => ToolConfigField.fromJson(e as Map<String, dynamic>))
             .toList(),
+        config: (j['config'] as List? ?? [])
+            .map((e) => ToolConfig.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        requiredConfig: (j['required_config'] as List? ?? [])
+            .map((e) => '$e')
+            .toList(),
       );
+
+  /// Parsed parameter tree (properties + nested array/object items),
+  /// honoring the required list. Empty when parameters is missing/empty.
+  List<ToolParam> get params => ToolParam.parseSchema(parameters);
+}
+
+/// A declared extension config knob (from the tool's owning extension config).
+class ToolConfig {
+  final String name;
+  final String type; // string | number | boolean | enum | json
+  final List<String> enumValues;
+  final dynamic defaultValue;
+  final String description;
+  final String scope; // global | session
+  ToolConfig({
+    required this.name,
+    required this.type,
+    this.enumValues = const [],
+    this.defaultValue,
+    this.description = '',
+    this.scope = 'global',
+  });
+  factory ToolConfig.fromJson(Map<String, dynamic> j) => ToolConfig(
+        name: j['name'] as String? ?? '',
+        type: j['type'] as String? ?? 'string',
+        enumValues: (j['enum_values'] as List? ?? []).map((e) => '$e').toList(),
+        defaultValue: j['default'],
+        description: j['description'] as String? ?? '',
+        scope: j['scope'] as String? ?? 'global',
+      );
+}
+
+/// A single tool input parameter (recursively nests array/object items).
+class ToolParam {
+  final String name;
+  final String type;
+  final String description;
+  final bool required;
+  final List<String>? enumValues;
+  final List<ToolParam> children;
+  final String? defaultValue;
+  ToolParam({
+    required this.name,
+    required this.type,
+    this.description = '',
+    this.required = false,
+    this.enumValues,
+    this.children = const [],
+    this.defaultValue,
+  });
+
+  /// Parse `parameters` JSON-Schema into a flat/recursive param list.
+  static List<ToolParam> parseSchema(Map<String, dynamic>? schema) {
+    if (schema == null) return const [];
+    final out = <ToolParam>[];
+    final properties = schema['properties'];
+    if (properties is! Map) return out;
+    final requiredList = (schema['required'] as List?)?.map((e) => '$e').toSet() ??
+        const <String>{};
+    properties.forEach((key, value) {
+      if (value is! Map) return;
+      final v = value.cast<String, dynamic>();
+      final type = (v['type'] as String?) ?? 'object';
+      final children = <ToolParam>[];
+      // array items object/array
+      final items = v['items'];
+      if (items is Map) {
+        final im = items.cast<String, dynamic>();
+        if ((im['type'] as String?) == 'array' ||
+            (im['properties'] as Map?)?.isNotEmpty == true) {
+          children.addAll(parseSchema({
+            'type': 'object',
+            'properties': im['properties'],
+            'required': im['required'],
+          }));
+        }
+      } else if (type == 'object' && v['properties'] is Map) {
+        children.addAll(parseSchema(v));
+      }
+      out.add(ToolParam(
+        name: '$key',
+        type: type,
+        description: (v['description'] as String?) ?? '',
+        required: requiredList.contains('$key'),
+        enumValues: v['enum'] is List ? (v['enum'] as List).map((e) => '$e').toList() : null,
+        defaultValue: v['default'] == null ? null : '${v['default']}',
+        children: children,
+      ));
+    });
+    return out;
+  }
 }
 
 class ProviderModel {
@@ -729,14 +951,11 @@ class Sandbox {
     required this.syncedRev,
   });
   factory Sandbox.fromJson(Map<String, dynamic> j) => Sandbox(
-        containerId: j['container_id'] as String? ??
-            ((j['container_ids'] as List?)?.firstOrNull?.toString() ??
-                j['name'] as String? ??
-                ''),
+        containerId: j['container_id'] as String? ?? '',
         session: j['session'] as String? ?? '',
-        podName: j['pod_name'] as String? ?? j['name'] as String? ?? '',
-        status: j['status'] as String? ?? j['phase'] as String? ?? '',
-        workerUrl: j['worker_url'] as String? ?? j['worker_url'] as String? ?? '',
+        podName: j['pod_name'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+        workerUrl: j['worker_url'] as String? ?? '',
         podIp: j['pod_ip'] as String? ?? '',
         syncedRev: j['synced_rev'] as String? ?? '',
       );
@@ -768,9 +987,7 @@ class Deployment {
         ready: j['ready'] as int? ?? 0,
         namespace: j['namespace'] as String? ?? '',
         age: j['age'] as String? ?? '',
-        ports: (j['ports'] as List? ?? [])
-            .map((e) => e is int ? e : 0)
-            .toList(),
+        ports: (j['ports'] as List? ?? []).map((e) => e as int).toList(),
         session: j['session'] as String?,
       );
 }
@@ -1017,7 +1234,7 @@ class GitTag {
   GitTag({required this.name, required this.target});
   factory GitTag.fromJson(Map<String, dynamic> j) => GitTag(
         name: j['name'] as String? ?? '',
-        target: j['target'] as String? ?? j['revision_id'] as String? ?? '',
+        target: j['target'] as String? ?? '',
       );
 }
 
@@ -1038,4 +1255,114 @@ class RepoMirror {
         mirrorUrl: j['mirror_url'] as String? ?? '',
         hasSecret: j['has_secret'] as bool? ?? false,
       );
+}
+
+/// Stored per-repo mirror config (urls + whether a push secret is set; the
+/// secret itself never leaves the platform).
+class MirrorCfg {
+  final String pullUrl;
+  final String pushUrl;
+  final bool pushSecretSet;
+  MirrorCfg({
+    this.pullUrl = '',
+    this.pushUrl = '',
+    this.pushSecretSet = false,
+  });
+}
+/// jj-lab branch (GET /repos/{org}/{repo}/branches).
+class BranchInfo {
+  final String name;
+  final String sha;
+  BranchInfo({required this.name, required this.sha});
+  factory BranchInfo.fromJson(Map<String, dynamic> j) => BranchInfo(
+        name: j['name'] as String? ?? '',
+        sha: j['sha'] as String? ?? '',
+      );
+}
+
+/// A release asset (jj-lab releases.rs): name/size/digest/content_type.
+class ReleaseAsset {
+  final String name;
+  final int size;
+  final String digest;
+  final String contentType;
+  ReleaseAsset({
+    required this.name,
+    required this.size,
+    required this.digest,
+    required this.contentType,
+  });
+  factory ReleaseAsset.fromJson(Map<String, dynamic> j) => ReleaseAsset(
+        name: j['name'] as String? ?? '',
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        digest: j['digest'] as String? ?? '',
+        contentType: j['content_type'] as String? ?? '',
+      );
+}
+
+/// jj-lab release (GET /repos/{org}/{repo}/releases).
+class Release {
+  final String tagName;
+  final String name;
+  final String body;
+  final bool draft;
+  final bool prerelease;
+  final List<ReleaseAsset> assets;
+  Release({
+    required this.tagName,
+    required this.name,
+    required this.body,
+    required this.draft,
+    required this.prerelease,
+    required this.assets,
+  });
+  factory Release.fromJson(Map<String, dynamic> j) => Release(
+        tagName: j['tag_name'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        body: j['body'] as String? ?? '',
+        draft: j['draft'] as bool? ?? false,
+        prerelease: j['prerelease'] as bool? ?? false,
+        assets: ((j['assets'] as List?) ?? [])
+            .map((e) => ReleaseAsset.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// A requirement worksheet (agent request/approval) awaiting a user decision.
+class Worksheet {
+  final String id;
+  final String sessionName;
+  final String extId;
+  final String action;
+  final String args;
+  final String title;
+  final String? originCallId;
+  final String status; // pending | dispatched | rejected
+  final String createdAt;
+  final String? decidedAt;
+  Worksheet({
+    required this.id,
+    required this.sessionName,
+    required this.extId,
+    required this.action,
+    required this.args,
+    required this.title,
+    this.originCallId,
+    required this.status,
+    required this.createdAt,
+    this.decidedAt,
+  });
+  factory Worksheet.fromJson(Map<String, dynamic> j) => Worksheet(
+        id: j['id'] as String? ?? '',
+        sessionName: j['session_name'] as String? ?? '',
+        extId: j['ext_id'] as String? ?? '',
+        action: j['action'] as String? ?? '',
+        args: j['args'] as String? ?? '',
+        title: j['title'] as String? ?? '',
+        originCallId: j['origin_call_id'] as String?,
+        status: j['status'] as String? ?? 'pending',
+        createdAt: j['created_at'] as String? ?? '',
+        decidedAt: j['decided_at'] as String?,
+      );
+  bool get isPending => status == 'pending';
 }

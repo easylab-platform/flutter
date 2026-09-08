@@ -1,17 +1,15 @@
 import 'package:flutter/foundation.dart';
 
 import 'api.dart';
+import 'enums.dart';
 import 'models.dart';
-
-enum SiderTab { chat, code, containers, packages, config }
-
-enum SessionOverlay { timeline, files, mailbox, container, todos }
+import 'navigation.dart';
 
 /// Mirrors stores.svelte.ts: app-wide state + repository/file-outlook caching.
 class AppStore extends ChangeNotifier {
   AppStore(this.api);
 
-  final EasyLabClient api;
+  final EasyLabApi api;
 
   SiderTab siderTab = SiderTab.chat;
   List<Session> sessions = [];
@@ -144,6 +142,24 @@ class AppStore extends ChangeNotifier {
     await loadTreeDir('');
   }
 
+  /// Clear the current repo selection back to the org tree (used by the code
+  /// screen's back button when no file is open, and by the mobile stack).
+  void closeRepo() {
+    codeOrg = '';
+    codeRepo = '';
+    codeBranch = '';
+    selectedFilePath = null;
+    fileContent = '';
+    showFileHistory = false;
+    fileHistory = [];
+    expandedCommits = {};
+    fileDiffs = {};
+    activeDiffChangeId = null;
+    treeCache = {};
+    expandedDirs = {'',};
+    notifyListeners();
+  }
+
   Future<void> openFile(String path) async {
     selectedFilePath = path;
     showFileHistory = false;
@@ -166,7 +182,11 @@ class AppStore extends ChangeNotifier {
       return fileDiffs[changeId] ?? '';
     }
     try {
-      final d = await api.fileDiff(codeOrg, codeRepo, changeId, selectedFilePath!);
+      // jjlab exposes commit diffs, not per-change file-diffs; resolve the
+      // change_id → current commit_id → unified diff (rebase-safe).
+      final d = await api.changeDiff(
+          codeOrg, codeRepo, changeId,
+          branch: codeBranch);
       fileDiffs[changeId] = d;
       notifyListeners();
       return d;
@@ -224,7 +244,7 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<String> get existingBranches =>
+  List<String> get existingBranchs =>
       sessions.map((s) => s.branch).toList();
 
   Future<void> deleteSession(String id) async {
@@ -269,6 +289,19 @@ class AppStore extends ChangeNotifier {
     sessionOverlay = null;
     diffChangeId = null;
     markSessionRead(id);
+    // Open the conversation as a page in the chat stack.
+    pushPage(ChatSessionPage());
+  }
+
+  /// Open a repo in the code tab at the top of its stack.
+  void openCodeRepo(String org, String repo, String branch) {
+    openRepo(org, repo, branch);
+    pushPage(CodeRepoPage(org, repo, branch));
+  }
+
+  /// Open a file in the code tab at the top of its stack.
+  void openCodeFile(String path) {
+    pushPage(CodeFilePage(path));
   }
 
   /// Optimistically clear the local badge; the platform records the read
@@ -321,6 +354,46 @@ class AppStore extends ChangeNotifier {
     siderTab = tab;
     notifyListeners();
   }
+
+  // ---- Navigation stack (per tab) ----------------------------------------
+
+  /// Read-only view of the current tab's navigation stack. Populated lazily
+  /// by [ensureRoot] on first access; phone renders the top entry, tablets the
+  /// last two. Switching tabs preserves each tab's depth (never reset).
+  final Map<SiderTab, List<AppPage>> _stacks = {};
+
+  List<AppPage> _stackFor(SiderTab tab) =>
+      _stacks.putIfAbsent(tab, () => [rootPageFor(tab)]);
+
+  List<AppPage> get currentStack => _stackFor(siderTab);
+
+  AppPage get topPage => currentStack.last;
+
+  /// Push a page onto the current tab's stack. If a page with the same key
+  /// already exists it is replaced at its existing depth (so e.g. re-opening a
+  /// file doesn't grow the stack).
+  void pushPage(AppPage page) {
+    final list = currentStack;
+    final idx = page.key == null ? -1 : list.indexWhere((p) => p.key == page.key);
+    if (idx != -1) {
+      // Truncate to the existing entry, then re-append a fresh one.
+      list.removeRange(idx, list.length);
+    }
+    list.add(page);
+    notifyListeners();
+  }
+
+  /// Pop the top page of the current tab's stack. Never pops below the root.
+  void popPage() {
+    final list = currentStack;
+    if (list.length > 1) {
+      list.removeLast();
+      notifyListeners();
+    }
+  }
+
+  /// True when the current tab stack has more than just its root page.
+  bool get canPopPage => currentStack.length > 1;
 
   /// Public wrapper so screens can trigger a rebuild after mutating lists.
   void notifyObservers() => notifyListeners();

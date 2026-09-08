@@ -1,5 +1,5 @@
 name: easylab_client
-description: "EasyLab — revision-native AI coding & VCS platform client."
+description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,10 +16,10 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.1.1+2
+version: 0.0.59+59
 
 environment:
-  sdk: ^3.8.0
+  sdk: ^3.13.2
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -37,17 +37,25 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   http: ^1.6.0
-  easylab_client_sdk:
-    git:
-      url: https://github.com/easylab-platform/easylab-client-sdk-dart.git
-      ref: v0.1.0
-  shared_preferences: ^2.5.3
+  shared_preferences: ^2.5.5
   flutter_markdown_plus: ^1.0.0
   collection: ^1.19.1
-
+  path_provider: ^2.1.6
+  file_picker: ^12.1.3
+  http_parser: ^4.1.2
+  image_picker: ^1.2.3
+  intl: any
+  re_highlight: ^0.0.3
+  easylab_client_sdk:
+    git:
+      url: https://github.com/easylab-platform/easylab-sdk-dart.git
+      ref: v0.2.0
+  connectrpc: ^2.0.0
+  protobuf: ^6.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -67,6 +75,8 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  generate: true
+
   assets:
     - assets/certs/
 
@@ -78,6 +88,9 @@ flutter:
     - family: NotoSansSC
       fonts:
         - asset: assets/fonts/NotoSansSC.ttf
+    - family: MaterialDesignIcons
+      fonts:
+        - asset: assets/fonts/materialdesignicons-webfont.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:
