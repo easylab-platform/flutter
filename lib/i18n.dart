@@ -81,5 +81,4 @@ final Map<String, String Function(AppLocalizations)> _resolve = {
   'files': (l) => l.files,
   'mailbox': (l) => l.mailbox,
   'container': (l) => l.container,
-  'todos': (l) => l.todos,
 };

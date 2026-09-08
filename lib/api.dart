@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -102,48 +101,6 @@ class EasyLabApi {
   }
 
   String _enc(String s) => Uri.encodeComponent(s);
-
-  dynamic _decode(http.Response r) {
-    if (r.statusCode >= 400) throw ApiException(r.statusCode, r.body);
-    if (r.body.isEmpty) return const <String, dynamic>{};
-    return jsonDecode(r.body);
-  }
-
-  Future<dynamic> _get(String path, [Map<String, dynamic>? query]) async {
-    final r = await client.get(_u(path, query), headers: _headers);
-    return _decode(r);
-  }
-
-  Future<dynamic> _post(String path, [Object? body]) async {
-    final r = await client.post(
-      _u(path),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(r);
-  }
-
-  Future<dynamic> _put(String path, Object? body) async {
-    final r = await client.put(
-      _u(path),
-      headers: _headers,
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(r);
-  }
-
-  Future<dynamic> _del(String path) async {
-    final r = await client.delete(_u(path), headers: _headers);
-    return _decode(r);
-  }
-
-  List<T> _list<T>(dynamic j, T Function(Map<String, dynamic>) f,
-      [String key = '']) {
-    final src = key.isEmpty ? j : j[key];
-    return ((src as List?) ?? [])
-        .map((e) => f(e as Map<String, dynamic>))
-        .toList();
-  }
 
   // ---- sessions ----
 
@@ -349,16 +306,23 @@ class EasyLabApi {
   }
 
   Future<Session> forkRepo(Map<String, dynamic> params) async {
-    final j = await _post('/api/v1/repos/fork', params) as Map<String, dynamic>;
-    return Session.fromJson(j['session'] as Map<String, dynamic>);
+    await _lab.forkRepo(sdk.ForkRepoRequest(
+      org: (params['org'] ?? '') as String,
+      repo: (params['repo'] ?? '') as String,
+      to: (params['to'] ?? '') as String,
+    ));
+    return Session(
+      id: (params['name'] ?? '') as String,
+      org: (params['org'] ?? '') as String,
+      repo: (params['repo'] ?? '') as String,
+      branch: (params['branch'] ?? '') as String,
+    );
   }
 
   Future<String> adoptSession(String org, String repo, String branch) async {
-    final j = await _post(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/branches/${_enc(branch)}/session',
-      null,
-    ) as Map<String, dynamic>;
-    return j['session_name'] as String? ?? '';
+    await _lab.cloneRepo(sdk.CloneRepoRequest(
+        org: org, repo: repo, gitUrl: '', rev: branch));
+    return '$org:$repo:$branch';
   }
 
   Future<void> ensureOrg(String org) => _lab.ensureOrg(sdk.EnsureOrgRequest(org: org));
@@ -378,7 +342,8 @@ class EasyLabApi {
   Future<void> deleteRepo(String org, String repo) =>
       _lab.deleteRepo(sdk.DeleteRepoRequest(org: org, repo: repo));
 
-  Future<void> deleteOrg(String org) => _del('/api/v1/repos/${_enc(org)}');
+  Future<void> deleteOrg(String org) =>
+      _lab.deleteOrg(sdk.DeleteOrgRequest(org: org));
 
   Future<List<DiffFile>> diffChange(
       String org, String repo, String changeId) async {
@@ -387,37 +352,14 @@ class EasyLabApi {
     return r.files.map((f) => DiffFile(path: f.path, diffText: f.diff)).toList();
   }
 
-  /// Unified-diff of a change, resolved change_id → current commit_id →
-  /// `/commits/{id}/diff` (jj `show` semantics — rebase-safe, because the
-  /// change_id always resolves to its current visible commit).
-  ///
-  /// Returns the raw unified diff string (parse with [parseDiff]).
+  /// Unified-diff of a change (jj `show` semantics). Uses easylab Diff RPC
+  /// over the repo, so the change_id resolves to its current visible commit.
   Future<String> changeDiff(String org, String repo, String changeId,
       {String branch = ''}) async {
-    // 1) change_id -> commit_id via /changes?rev=<branch> (change-id dedup).
-    final changes = await _get(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/changes',
-      branch.isEmpty ? null : {'rev': branch},
-    ) as Map<String, dynamic>;
-    String? commitId;
-    for (final c in (changes['changes'] as List? ?? [])) {
-      final m = c as Map<String, dynamic>;
-      if (m['change_id'] == changeId) {
-        final cid = m['commit_id'] as String?;
-        // Prefer a non-empty real sha. This is the CURRENT commit of the
-        // change (change chain collapse), so it is rebase-stable.
-        if (cid != null && cid.isNotEmpty) {
-          commitId = cid;
-          break;
-        }
-      }
-    }
-    if (commitId == null) return '';
-    // 2) commit_id -> unified diff (before/after of this change).
-    final j = await _get(
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/commits/${_enc(commitId)}/diff',
-    ) as Map<String, dynamic>;
-    return j['diff'] as String? ?? '';
+    final r = await _lab.diff(sdk.DiffRequest(
+        org: org, repo: repo, changeId: changeId));
+    if (r.files.isEmpty) return '';
+    return r.files.map((f) => 'diff --git a/${f.path} b/${f.path}\n${f.diff}').join('\n');
   }
 
   Future<String> fileAtChange(
@@ -469,9 +411,20 @@ class EasyLabApi {
   }
 
   Future<List<Release>> releases(String org, String repo) async {
-    final j = await _get('/api/v1/repos/${_enc(org)}/${_enc(repo)}/releases')
-        as Map<String, dynamic>;
-    return _list(j, Release.fromJson, 'releases');
+    final r = await _lab.listReleases(sdk.ListReleasesRequest(org: org, repo: repo));
+    return r.releases.map((v) => Release(
+      tagName: v.tag,
+      name: v.name,
+      body: v.description,
+      draft: v.draft,
+      prerelease: v.prerelease,
+      assets: v.assets.map((a) => ReleaseAsset(
+        name: a.name,
+        size: a.size.toInt(),
+        digest: a.digest,
+        contentType: a.contentType,
+      )).toList(),
+    )).toList();
   }
 
   /// Platform-relative path of a release asset download.
@@ -512,19 +465,17 @@ class EasyLabApi {
 
   Future<Map<String, dynamic>> mirrorSync(
       String org, String repo, String kind, Map<String, dynamic> body) async {
-    return await _post(
-            '/api/v1/repos/${_enc(org)}/${_enc(repo)}/$kind', body)
-        as Map<String, dynamic>;
+    final r = await _lab.syncMirror(sdk.SyncMirrorRequest(
+        org: org, repo: repo, kind: kind, body: body.entries.map((e) => MapEntry('${e.key}', '${e.value}'))));
+    return {'ok': r.ok, 'updated_branches': r.updatedBranches, 'error': r.error};
   }
 
   Future<MirrorCfg> getMirror(String org, String repo) async {
-    final j = await _get(
-            '/api/v1/repos/${_enc(org)}/${_enc(repo)}/mirror')
-        as Map<String, dynamic>;
+    final r = await _lab.getMirror(sdk.GetMirrorRequest(org: org, repo: repo));
     return MirrorCfg(
-      pullUrl: j['pull_url'] as String? ?? '',
-      pushUrl: j['push_url'] as String? ?? '',
-      pushSecretSet: j['push_secret_set'] as bool? ?? false,
+      pullUrl: r.mirror.pullUrl,
+      pushUrl: r.mirror.pushUrl,
+      pushSecretSet: r.mirror.pushSecretSet,
     );
   }
 
@@ -532,16 +483,17 @@ class EasyLabApi {
       {String pullUrl = '',
       String pushUrl = '',
       String? pushSecret}) async {
-    await _put('/api/v1/repos/${_enc(org)}/${_enc(repo)}/mirror', {
-      if (pullUrl.isNotEmpty) 'pull_url': pullUrl,
-      if (pushUrl.isNotEmpty) 'push_url': pushUrl,
-      if (pushSecret != null && pushSecret.isNotEmpty)
-        'push_secret': pushSecret,
-    });
+    await _lab.setMirror(sdk.SetMirrorRequest(
+      org: org,
+      repo: repo,
+      pullUrl: pullUrl,
+      pushUrl: pushUrl,
+      pushSecret: pushSecret ?? '',
+    ));
   }
 
   Future<void> delMirror(String org, String repo) =>
-      _del('/api/v1/repos/${_enc(org)}/${_enc(repo)}/mirror');
+      _lab.deleteMirror(sdk.DeleteMirrorRequest(org: org, repo: repo));
 
   // ---- config / providers / models / presets / tools ----
 
@@ -760,16 +712,19 @@ class EasyLabApi {
     )).toList();
   }
 
+  /// A session's sandbox jobs surfaced via the Ops task registry
+  /// (easylab Ops ListTasks; each entry maps a session task to a JobInfo).
   Future<List<JobInfo>> jobs(String session) async {
-    final j = await _get('/api/v1/sandboxes/${_enc(session)}/jobs')
-        as Map<String, dynamic>;
-    final jobsMap = j['jobs'];
-    if (jobsMap is Map && jobsMap['jobs'] is List) {
-      return ((jobsMap['jobs']) as List)
-          .map((e) => JobInfo.fromJson(e as Map<String, dynamic>))
-          .toList();
-    }
-    return const [];
+    final r = await _ops.listTasks(sdk.ListTasksRequest());
+    return r.tasks
+        .where((t) => t.session == session)
+        .map((t) => JobInfo(
+          id: t.id,
+          command: t.command,
+          state: t.state,
+          exitCode: 0,
+        ))
+        .toList();
   }
 
   Future<ExecResult> exec(String session, String command) async {
@@ -843,14 +798,8 @@ class EasyLabApi {
           type: type, name: name, version: version));
 
   Future<List<String>> ociCatalog() async {
-    final j = await client.get(
-      Uri.parse('$baseUrl/v2/_catalog'),
-      headers: _headers,
-    );
-    final body = _decode(j) as Map<String, dynamic>;
-    return ((body['repositories'] as List?) ?? [])
-        .map((e) => e.toString())
-        .toList();
+    final r = await _registry.oCICatalog(sdk.OCICatalogRequest());
+    return r.repositories.toList();
   }
 }
 
