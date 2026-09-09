@@ -676,7 +676,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get selectFile => 'Select a file to view';
 
   @override
-  String get selectBookmark => 'Select a bookmark to browse files';
+  String get selectBookmark => 'Select a branch to browse files';
 
   @override
   String get noCommits => 'No commits';
@@ -707,7 +707,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get browserTitle => 'Browse';
 
   @override
-  String get bookmarksSection => 'Bookmarks';
+  String get bookmarksSection => 'Branches';
 
   @override
   String reposCount(String arg1) {
@@ -780,7 +780,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pickOrg => 'Pick an organization';
 
   @override
-  String get codeEmptyHint => 'Pick an org / repo / bookmark to browse code';
+  String get codeEmptyHint => 'Pick an org / repo / branch to browse code';
 
   @override
   String get backToList => 'Back to list';
