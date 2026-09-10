@@ -674,7 +674,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get selectFile => '选择一个文件查看';
 
   @override
-  String get selectBookmark => '选择分支浏览文件';
+  String get selectBookmark => '选择书签浏览文件';
 
   @override
   String get noCommits => '暂无提交';
@@ -704,7 +704,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get browserTitle => '浏览';
 
   @override
-  String get bookmarksSection => '分支';
+  String get bookmarksSection => '书签';
 
   @override
   String reposCount(String arg1) {

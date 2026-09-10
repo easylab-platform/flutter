@@ -133,11 +133,11 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "v0.2.1"
-      resolved-ref: d042cffd4983a4d9d0ed379437448c3982325263
+      ref: "v0.3.0"
+      resolved-ref: "964b7dc9cd89824217f8ac40ad9453c23403f0e1"
       url: "https://github.com/easylab-platform/easylab-sdk-dart.git"
     source: git
-    version: "0.2.1"
+    version: "0.3.0"
   fake_async:
     dependency: transitive
     description:

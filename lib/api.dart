@@ -4,6 +4,10 @@ import 'dart:io' as io;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 
+import 'package:connectrpc/connect.dart' as connect;
+import 'package:connectrpc/http2.dart';
+import 'package:connectrpc/protobuf.dart';
+import 'package:connectrpc/protocol/connect.dart' as protocol;
 import 'package:easylab_client_sdk/easylab_client_sdk.dart' as sdk;
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart' as wkt;
 
@@ -33,8 +37,10 @@ class EasyLabApi {
   final String token;
   final http.Client client;
 
-  // Strong-typed Connect clients (h2 over TLS), all via the gateway.
-  late final sdk.EasyLabClient _sdk;
+  // Strong-typed Connect clients (h2 over TLS), all via the gateway. The
+  // transport (and bearer auth) is built here — the SDK ships generated code
+  // only.
+  late final connect.Transport _transport;
   late final sdk.AgentServiceClient _agent;
   late final sdk.LabServiceClient _lab;
   late final sdk.OpsServiceClient _ops;
@@ -42,23 +48,47 @@ class EasyLabApi {
 
   EasyLabApi({required this.baseUrl, required this.token})
       : client = http.Client() {
-    _sdk = sdk.EasyLabClient(baseUrl: baseUrl, token: token,
-        securityContext: _caContext);
-    _agent = _sdk.agent;
-    _lab = _sdk.lab;
-    _ops = _sdk.ops;
-    _registry = _sdk.registry;
+    _init();
   }
   EasyLabApi.withClient(
       {required this.baseUrl,
       required this.token,
       required this.client}) {
-    _sdk = sdk.EasyLabClient(baseUrl: baseUrl, token: token,
-        securityContext: _caContext);
-    _agent = _sdk.agent;
-    _lab = _sdk.lab;
-    _ops = _sdk.ops;
-    _registry = _sdk.registry;
+    _init();
+  }
+
+  void _init() {
+    _transport = _buildTransport(baseUrl, token, _caContext);
+    _agent = sdk.AgentServiceClient(_transport);
+    _lab = sdk.LabServiceClient(_transport);
+    _ops = sdk.OpsServiceClient(_transport);
+    _registry = sdk.RegistryServiceClient(_transport);
+  }
+
+  /// Build the h2-over-TLS gateway transport (ALPN `h2`, bundled CA).
+  static connect.Transport _buildTransport(
+      String baseUrl, String token, io.SecurityContext? securityContext) {
+    final trimmed =
+        baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    return protocol.Transport(
+      baseUrl: trimmed,
+      codec: const ProtoCodec(),
+      httpClient: createHttpClient(
+        transport: Http2ClientTransport(context: securityContext),
+      ),
+      interceptors: [
+        if (token.isNotEmpty) _bearerInterceptor(token),
+      ],
+    );
+  }
+
+  static connect.Interceptor _bearerInterceptor(String token) {
+    return <I extends Object, O extends Object>(connect.AnyFn<I, O> next) {
+      return (req) async {
+        req.headers.set('authorization', ['Bearer $token']);
+        return next(req);
+      };
+    };
   }
 
   static Future<EasyLabApi> create(
@@ -261,7 +291,8 @@ class EasyLabApi {
   // ---- stream (SSE) ----
 
   Stream<StreamEvent> streamEvents(String sessionId) {
-    final sdkStream = _sdk.watchSession(sessionId);
+    final sdkStream =
+        _agent.watchSession(sdk.WatchSessionRequest(id: sessionId));
     return sdkStream.map((e) => StreamEvent(
         e.event,
         StructUtils.toJson(e.params)));
@@ -690,17 +721,6 @@ class EasyLabApi {
   Future<OpsStatus> status() async {
     final r = await _lab.status(sdk.StatusRequest());
     return OpsStatus(ok: r.ok, version: r.version, sandboxes: r.sandboxes);
-  }
-
-  Future<Map<String, dynamic>> buildImage(Map<String, dynamic> body) async {
-    final r = await _ops.build(sdk.BuildRequest(
-      org: body['org'] ?? '',
-      repo: body['repo'] ?? '',
-      ref: body['ref'] ?? '',
-      tag: body['tag'] ?? '',
-      context: body['context'] ?? '',
-    ));
-    return {'ok': r.ok, 'task_id': r.taskId, 'error': r.error};
   }
 
   Future<List<PublishSpec>> publishSpecs() async {

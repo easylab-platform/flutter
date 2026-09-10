@@ -49,7 +49,7 @@ dependencies:
   easylab_client_sdk:
     git:
       url: https://github.com/easylab-platform/easylab-sdk-dart.git
-      ref: v0.2.1
+      ref: v0.3.0
   connectrpc: ^2.0.0
   protobuf: ^6.0.0
 dev_dependencies:
