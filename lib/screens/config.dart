@@ -7,6 +7,7 @@ import '../navigation.dart';
 import '../prefs.dart';
 import '../store.dart';
 import '../theme/app_theme.dart';
+import 'tenants.dart';
 import '../services/models_dev.dart';
 import '../widgets/dialogs.dart';
 
@@ -91,6 +92,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
         return context.l10n.appearance;
       case 'tools':
         return context.l10n.tools;
+      case 'tenants':
+        return context.l10n.tenantsTitle;
       default:
         return id;
     }
@@ -121,6 +124,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
             () => _push('providers')),
         _listTile(
             context, Icons.auto_awesome_outlined, 'presets', () => _push('presets')),
+        _SectionHeader(context.l10n.tenantsSection),
+        _listTile(context, Icons.apartment_outlined, 'tenants',
+            () => _push('tenants')),
         _SectionHeader(context.l10n.workspace),
         _listTile(
             context, Icons.handyman_outlined, 'tools', () => _push('tools')),
@@ -223,6 +229,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
         return _presetsDetail();
       case 'tools':
         return _toolsDetail();
+      case 'tenants':
+        return TenantsDetail(api: store.api);
       default:
         return const SizedBox.shrink();
     }

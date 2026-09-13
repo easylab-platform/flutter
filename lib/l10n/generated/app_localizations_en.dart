@@ -956,4 +956,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get toolInputParams => 'Input';
+
+  @override
+  String get tenantsSection => 'TENANTS';
+
+  @override
+  String get tenantsTitle => 'Tenants';
+
+  @override
+  String get addTenant => 'New tenant';
+
+  @override
+  String get tenantSlug => 'Slug';
+
+  @override
+  String get tenantDisplayName => 'Display name';
+
+  @override
+  String get tenantAdminUser => 'Admin username';
+
+  @override
+  String get tenantTokenOnce => 'This user\'s token (shown once — copy it now)';
+
+  @override
+  String get tenantMembers => 'Members';
+
+  @override
+  String get tenantCreated => 'Tenant created';
+
+  @override
+  String get tenantsEmpty => 'No tenants yet.';
 }

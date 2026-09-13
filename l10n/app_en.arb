@@ -564,7 +564,6 @@
   "requiredConfig": "required config",
   "selectProviderFirst": "Select a provider first",
   "noModelsForProvider": "No models registered for this provider",
-  "selectBookmark": "Select a bookmark to browse files",
   "apiTypeOpenaiCompat": "OpenAI Compatible",
   "modelsLabel": "Models",
   "modelIdLabel": "model id…",
@@ -575,5 +574,15 @@
   "testModelOk": "Model OK: {arg1}",
   "connected": "Connected",
   "connectionError": "Connection error: {arg1}",
-  "toolInputParams": "Input"
+  "toolInputParams": "Input",
+  "tenantsSection": "TENANTS",
+  "tenantsTitle": "Tenants",
+  "addTenant": "New tenant",
+  "tenantSlug": "Slug",
+  "tenantDisplayName": "Display name",
+  "tenantAdminUser": "Admin username",
+  "tenantTokenOnce": "This user's token (shown once — copy it now)",
+  "tenantMembers": "Members",
+  "tenantCreated": "Tenant created",
+  "tenantsEmpty": "No tenants yet."
 }

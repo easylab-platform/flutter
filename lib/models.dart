@@ -1299,3 +1299,36 @@ class Release {
             .toList(),
       );
 }
+
+/// Tenant (multi-tenancy) DTOs.
+class TenantInfo {
+  final String id;
+  final String slug;
+  final String displayName;
+  final bool disabled;
+  TenantInfo({
+    required this.id,
+    required this.slug,
+    required this.displayName,
+    required this.disabled,
+  });
+}
+
+class TenantMemberInfo {
+  final String username;
+  final String role;
+  TenantMemberInfo({required this.username, required this.role});
+}
+
+class TenantCreateResult {
+  final TenantInfo tenant;
+  final String username;
+  final String token;
+  final bool agentTenant;
+  TenantCreateResult({
+    required this.tenant,
+    required this.username,
+    required this.token,
+    required this.agentTenant,
+  });
+}

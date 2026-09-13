@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 
 import 'package:connectrpc/connect.dart' as connect;
+import 'package:fixnum/fixnum.dart' as fixnum;
 import 'package:connectrpc/http2.dart';
 import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
@@ -45,6 +46,7 @@ class EasyLabApi {
   late final sdk.LabServiceClient _lab;
   late final sdk.OpsServiceClient _ops;
   late final sdk.RegistryServiceClient _registry;
+  late final sdk.TenantServiceClient _tenant;
 
   EasyLabApi({required this.baseUrl, required this.token})
       : client = http.Client() {
@@ -63,6 +65,7 @@ class EasyLabApi {
     _lab = sdk.LabServiceClient(_transport);
     _ops = sdk.OpsServiceClient(_transport);
     _registry = sdk.RegistryServiceClient(_transport);
+    _tenant = sdk.TenantServiceClient(_transport);
   }
 
   /// Build the h2-over-TLS gateway transport (ALPN `h2`, bundled CA).
@@ -538,7 +541,14 @@ class EasyLabApi {
         baseUrl: p.baseUrl,
         apiKey: p.apiKey,
         headers: p.headers.map((k, v) => MapEntry(k, v)),
-        models: p.models.map((id) => ProviderModel(id: id, name: id)).toList(),
+        models: p.models
+            .map((m) => ProviderModel(
+                  id: m.id,
+                  name: m.name.isEmpty ? m.id : m.name,
+                  contextLimit:
+                      int.tryParse(m.contextLimit.toString()),
+                ))
+            .toList(),
       );
     }
     return out;
@@ -552,7 +562,13 @@ class EasyLabApi {
         baseUrl: p.baseUrl,
         apiKey: p.apiKey,
         headers: p.headers?.entries,
-        models: p.models.map((m) => m.id),
+        models: p.models
+            .map((m) => sdk.ProviderModel(
+                  id: m.id,
+                  name: m.name,
+                  contextLimit: fixnum.Int64(m.contextLimit ?? 0),
+                ))
+            .toList(),
       ),
     ));
   }
@@ -820,6 +836,61 @@ class EasyLabApi {
   Future<List<String>> ociCatalog() async {
     final r = await _registry.oCICatalog(sdk.OCICatalogRequest());
     return r.repositories.toList();
+  }
+  // ---- tenants ----
+
+  Future<List<TenantInfo>> tenants() async {
+    final r = await _tenant.listTenants(sdk.ListTenantsRequest());
+    return r.tenants
+        .map((t) => TenantInfo(
+              id: t.id,
+              slug: t.slug,
+              displayName: t.displayName,
+              disabled: t.disabled,
+            ))
+        .toList();
+  }
+
+  Future<TenantCreateResult> createTenant({
+    required String slug,
+    required String displayName,
+    required String adminUsername,
+    String adminDisplayName = '',
+  }) async {
+    final r = await _tenant.createTenant(sdk.CreateTenantRequest(
+      slug: slug,
+      displayName: displayName,
+      adminUsername: adminUsername,
+      adminDisplayName: adminDisplayName,
+    ));
+    return TenantCreateResult(
+      tenant: TenantInfo(
+        id: r.tenant.id,
+        slug: r.tenant.slug,
+        displayName: r.tenant.displayName,
+        disabled: r.tenant.disabled,
+      ),
+      username: r.member.username,
+      token: r.token,
+      agentTenant: r.agentTenant,
+    );
+  }
+
+  Future<void> updateTenant(String id,
+      {String? displayName, bool? disabled}) async {
+    await _tenant.updateTenant(sdk.UpdateTenantRequest(
+      id: id,
+      displayName: displayName,
+      disabled: disabled,
+    ));
+  }
+
+  Future<List<TenantMemberInfo>> tenantMembers(String tenantId) async {
+    final r = await _tenant
+        .listTenantMembers(sdk.ListTenantMembersRequest(tenantId: tenantId));
+    return r.members
+        .map((m) => TenantMemberInfo(username: m.username, role: m.role))
+        .toList();
   }
 }
 

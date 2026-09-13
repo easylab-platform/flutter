@@ -1825,6 +1825,66 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'输入参数'**
   String get toolInputParams;
+
+  /// No description provided for @tenantsSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'租户'**
+  String get tenantsSection;
+
+  /// No description provided for @tenantsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'租户'**
+  String get tenantsTitle;
+
+  /// No description provided for @addTenant.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建租户'**
+  String get addTenant;
+
+  /// No description provided for @tenantSlug.
+  ///
+  /// In zh, this message translates to:
+  /// **'标识(slug)'**
+  String get tenantSlug;
+
+  /// No description provided for @tenantDisplayName.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示名'**
+  String get tenantDisplayName;
+
+  /// No description provided for @tenantAdminUser.
+  ///
+  /// In zh, this message translates to:
+  /// **'管理员用户名'**
+  String get tenantAdminUser;
+
+  /// No description provided for @tenantTokenOnce.
+  ///
+  /// In zh, this message translates to:
+  /// **'该用户的令牌(仅显示一次,请立即保存)'**
+  String get tenantTokenOnce;
+
+  /// No description provided for @tenantMembers.
+  ///
+  /// In zh, this message translates to:
+  /// **'成员'**
+  String get tenantMembers;
+
+  /// No description provided for @tenantCreated.
+  ///
+  /// In zh, this message translates to:
+  /// **'租户已创建'**
+  String get tenantCreated;
+
+  /// No description provided for @tenantsEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无租户。'**
+  String get tenantsEmpty;
 }
 
 class _AppLocalizationsDelegate

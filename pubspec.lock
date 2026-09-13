@@ -133,11 +133,11 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "v0.3.0"
-      resolved-ref: "964b7dc9cd89824217f8ac40ad9453c23403f0e1"
+      ref: "v0.8.0"
+      resolved-ref: "96604464a50ccc3aa9c8d7fe27035723eb1cc719"
       url: "https://github.com/easylab-platform/easylab-sdk-dart.git"
     source: git
-    version: "0.3.0"
+    version: "0.8.0"
   fake_async:
     dependency: transitive
     description:
@@ -634,10 +634,10 @@ packages:
     dependency: "direct main"
     description:
       name: protobuf
-      sha256: "75ec242d22e950bdcc79ee38dd520ce4ee0bc491d7fadc4ea47694604d22bf06"
+      sha256: "13b6717366aa7ec3792dd62c19c7d33a785708224365f2db23c5ca01f1c1a0f2"
       url: "https://pub.dev"
     source: hosted
-    version: "6.0.0"
+    version: "6.1.0"
   pub_semver:
     dependency: transitive
     description:
