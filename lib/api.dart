@@ -232,7 +232,10 @@ class EasyLabApi {
 
   /// Platform-relative path of a stored file (for streaming download +
   /// save-to-Downloads).
-  String filePath(String code) => '/api/v1/files/$code';
+  /// Gateway file path is not needed: bytes are fetched via agent GetFile
+  /// (the gateway forwards agent.v1). Kept for call sites that only need a
+  /// display key.
+  String filePath(String code) => code;
 
   Future<(List<Message>, bool)> messages(String id,
       {String? before, int limit = 30}) async {
@@ -496,31 +499,38 @@ class EasyLabApi {
 
   /// Platform-relative path of a release asset download.
   String assetPath(String org, String repo, String tag, String name) =>
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/releases/${_enc(tag)}/assets/${_enc(name)}';
+      'asset:$org:$repo:$tag:$name';
 
   /// Platform-relative path of a source tarball for a rev/tag.
   String archivePath(String org, String repo, String rev) =>
-      '/api/v1/repos/${_enc(org)}/${_enc(repo)}/archive/tarball/${_enc(rev)}';
+      'archive:$org:$repo:$rev';
 
-  /// Streams an authenticated GET [path] (relative to baseUrl) into [sink],
-  /// reporting progress. Used for release assets and source tarballs.
+  /// Downloads a release asset or source tarball as bytes via the gateway
+  /// RPCs (no REST). [path] is one of the strings produced by [assetPath] /
+  /// [archivePath]; the corresponding RPC is chosen here.
   Future<int> streamTo(String path, io.IOSink sink,
       {void Function(int received, int total)? onProgress}) async {
-    final req = http.Request('GET', _u(path));
-    req.headers.addAll(_headers);
-    final resp = await client.send(req).timeout(const Duration(seconds: 30));
-    if (resp.statusCode != 200) {
-      throw ApiException(resp.statusCode, await resp.stream.bytesToString());
-    }
-    final total = resp.contentLength ?? 0;
-    var received = 0;
-    await for (final chunk in resp.stream) {
-      sink.add(chunk);
-      received += chunk.length;
-      onProgress?.call(received, total);
-    }
+    final bytes = await _bytesForPath(path);
+    sink.add(bytes);
     await sink.flush();
-    return received;
+    onProgress?.call(bytes.length, bytes.length);
+    return bytes.length;
+  }
+
+  Future<List<int>> _bytesForPath(String path) async {
+    if (path.startsWith('asset:')) {
+      final p = path.split(':');
+      // asset:org:repo:tag:name
+      final r = await _lab.downloadReleaseAsset(sdk.DownloadReleaseAssetRequest(
+          org: p[1], repo: p[2], tag: p[3], name: p[4]));
+      return r.data;
+    }
+    if (path.startsWith('archive:')) {
+      final p = path.split(':');
+      final r = await _lab.archive(sdk.ArchiveRequest(org: p[1], repo: p[2], ref: p[3]));
+      return r.data;
+    }
+    throw ApiException(400, 'unknown download path: $path');
   }
 
   Future<List<String>> blame(
