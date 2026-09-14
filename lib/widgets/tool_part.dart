@@ -1,44 +1,30 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../i18n.dart';
 import '../models.dart';
-import '../screens/change_diff.dart';
-import '../screens/task_progress.dart';
 import '../theme/app_theme.dart';
-import 'diff_parser.dart';
-import 'diff_view.dart';
-import 'code_view.dart';
+import 'media_attachment.dart';
 import 'tool_icon.dart';
 
-/// Recreates ToolPartView.svelte + family-specific body rendering.
+/// Recreates ToolPartView.svelte: a uniform tool-result card with three
+/// independent collapsible sections — input params, content (the tool output)
+/// and metadata (change id, diff, +/- additions/deletions). Every tool uses the
+/// same layout so cards are consistent regardless of tool family.
 ///
-/// Every tool is drawn with a shared header (status dot, icon, name, title,
-/// fold arrow) and a family-appropriate body:
-///   - file/content, git, sandbox-shell, build/deploy, package/pull,
-///     browser, memory, generic.
-/// A change_id badge (when the tool produced a change) jumps to the change
-/// comparison screen; running long tasks offer a live-output screen.
+/// The standalone agent exposes no change-diff / build-task surfaces, so the
+/// change id and diff are rendered as plain collapsible text (no navigation).
 class ToolPartView extends StatefulWidget {
   final ChatPart part;
   final bool isStreaming;
   final EasyLabApi? api;
-  final String? org;
-  final String? repo;
-  final String? branch;
-  final void Function(String changeId)? onOpenChange;
   const ToolPartView({
     super.key,
     required this.part,
     this.isStreaming = false,
     this.api,
-    this.org,
-    this.repo,
-    this.branch,
-    this.onOpenChange,
   });
 
   @override
@@ -46,220 +32,85 @@ class ToolPartView extends StatefulWidget {
 }
 
 class _ToolPartViewState extends State<ToolPartView> {
-  bool _open = true;
-  // Toggle for the input-params JSON panel only (independent of card _open).
-  bool _paramsOpen = true;
+  EasyLabApi? get _api => widget.api;
 
-  @override
-  void initState() {
-    super.initState();
-    // read results are dense — default to collapsed; the metadata bar (path /
-    // branch / line range) stays visible above, only the file content folds.
-    _open = widget.part.tool != 'read';
+  /// Fixed media fields in a tool result's `data`: `images`/`videos`/`audio`
+  /// (each `{code, mime, ...}`) render as media cards. This is the stable
+  /// contract the generation tools emit.
+  List<MediaRef> _mediaRefs(ChatPart part) {
+    final data = part.state?.data;
+    if (data == null) return const [];
+    final out = <MediaRef>[];
+    void collect(Object? v) {
+      if (v is Map) {
+        final code = v['code'];
+        if (code is String && code.isNotEmpty) {
+          out.add(MediaRef(
+            code: code,
+            mime: v['mime'] is String ? v['mime'] as String : null,
+            name: v['name'] is String ? v['name'] as String : null,
+          ));
+        }
+      }
+    }
+
+    for (final key in const ['images', 'videos', 'audio']) {
+      final v = data[key];
+      if (v is List) {
+        for (final e in v) collect(e);
+      } else {
+        collect(v);
+      }
+    }
+    return out;
   }
+  // Card-level fold + per-section folds (input / content / metadata).
+  bool _open = true;
+  bool _inputOpen = true;
+  bool _contentOpen = true;
+  bool _metaOpen = true;
 
-  String _s(Object? v) => v is String ? v : '';
-
-  String get tool => widget.part.tool;
-  ToolState? get state => widget.part.state;
+  ChatPart get part => widget.part;
+  ToolState? get state => part.state;
+  String get tool => part.tool;
   String get status => state?.status ?? 'complete';
-  Map<String, dynamic> get input =>
-      (state?.input ?? const <String, dynamic>{});
+  Map<String, dynamic> get input => state?.input ?? const <String, dynamic>{};
+
   bool get hasError => status == 'error';
-  String? get changeId {
+  bool get _running => widget.isStreaming && status == 'running';
+
+  String? get _changeId {
     final c = state?.changeId;
     return (c is String && c.isNotEmpty) ? c : null;
   }
 
-  String get toolId => tool.toLowerCase();
-
-  /// Unified diff the tool produced (write/delete/edit/sandbox-edit etc).
-  String? get _toolDiff => state?.diff;
-
-  /// Family classifier — drives the body renderer.
-  String get family {
-    final t = toolId;
-    if (t.startsWith('git-') || t == 'git-diff' || t == 'git-log' ||
-        t == 'git-show' || t == 'git-blame' || t == 'git-branches') {
-      return 'git';
-    }
-    if (t.startsWith('sandbox-') || t == 'sandbox-id' || t == 'sandbox-status') {
-      return 'sandbox';
-    }
-    if (t.startsWith('container-') || t.startsWith('deploy') ||
-        t.startsWith('helm') || t == 'image-list' ||
-        t == 'deployment-list') {
-      return 'deploy';
-    }
-    if (t.startsWith('package') || t.startsWith('publish') ||
-        t.startsWith('list-registry') || t.startsWith('list-containerfile') ||
-        t.startsWith('pull-') || t == 'sandbox-download') {
-      return 'package';
-    }
-    if (t.startsWith('browser') || t.startsWith('web') ||
-        t == 'navigate' || t == 'navigate_back' || t == 'navigate_forward' ||
-        t == 'webfetch' || t == 'snapshot' || t == 'screenshot' ||
-        t == 'click' || t == 'type' || t == 'find' || t == 'wait_for') {
-      return 'browser';
-    }
-    if (t.startsWith('todo') || t.startsWith('history') ||
-        t == 'file_info' || t == 'image_read') {
-      return 'memory';
-    }
-    if (t == 'read' || t == 'write' || t == 'delete' || t == 'edit' ||
-        t == 'ls' || t == 'grep' || t == 'explore' || t == 'org' ||
-        t == 'repo' || t == 'branch') {
-      return 'file';
-    }
-    return 'generic';
+  String? get _diff {
+    final d = state?.diff;
+    return (d is String && d.isNotEmpty) ? d : null;
   }
 
-  String inputSummary(Map<String, dynamic> inp) {
-    final jobId = _s(inp['job_id']);
-    final t = tool;
-    final code = _s(inp['code']);
-    switch (t) {
-      case 'image_read':
-      case 'image-read':
-        return code.isNotEmpty ? 'image $code' : 'read image';
-      case 'sandbox-read':
-      case 'sandbox-write':
-      case 'sandbox-edit':
-        return _s(inp['path']);
-      case 'sandbox-delete':
-        return 'delete ${_s(inp['path'])}';
-      case 'git-restore':
-        return 'restore ${_s(inp['path'])} @ ${_s(inp['rev'])}';
-      case 'sandbox-job-list':
-        return 'list jobs';
-      case 'sandbox-job-output':
-        return 'output $jobId${_s(inp['grep']).isNotEmpty ? ' · grep ${_s(inp['grep'])}' : ''}';
-      case 'sandbox-job-wait':
-        return 'wait $jobId';
-      case 'sandbox-job-kill':
-        return 'kill $jobId';
-      case 'sandbox-job-stdin':
-        return 'stdin $jobId';
-      case 'sandbox-port':
-        return 'port ${_s(inp['sandbox_path'])} → ${_s(inp['repo_path'])}';
-      case 'explore':
-        return _s(inp['org']).isNotEmpty ? _s(inp['org']) : 'explore orgs/repos';
-      case 'list-containerfile-templates':
-        return 'list build templates';
-      case 'container-build':
-        return 'build ${_s(inp['tag'])} ← ${_s(inp['dockerfile_path'])}';
-      case 'package-publish':
-        return 'publish ${_s(inp['protocol'])} ${_s(inp['name'])}';
-      case 'service-deploy':
-        return 'deploy ${_s(inp['image'])}';
-      case 'pull-oci-image':
-        return 'pull image ${_s(inp['image'])}';
-      case 'pull-git-repo':
-        return 'clone ${_s(inp['git_url'])}';
-      case 'list-registry-packages':
-        return 'list packages';
-      case 'browser-navigate':
-        return 'navigate ${_s(inp['url'])}';
-      case 'browser-navigate-back':
-        return 'navigate back';
-      case 'browser-navigate-forward':
-        return 'navigate forward';
-      case 'browser-click':
-        return 'click ${_s(inp['element'])}';
-      case 'browser-type':
-        return 'type ${_s(inp['element'])}';
-      case 'browser-snapshot':
-        return 'snapshot';
-      case 'browser-take-screenshot':
-        return 'screenshot';
-      case 'browser-webfetch':
-        return 'webfetch ${_s(inp['url'])}';
-      default:
-        return _genericSummary(t, inp);
-    }
-  }
-
-  String _genericSummary(String t, Map<String, dynamic> inp) {
-    // Best-effort: join known scalar args into a short "k v" summary.
-    final parts = <String>[];
-    for (final kv in inp.entries) {
-      final v = kv.value;
-      if (v is String && v.isNotEmpty) {
-        parts.add(v);
-      } else if (v is num) {
-        parts.add('$v');
-      }
-    }
-    return parts.take(3).join(' ');
-  }
-
-  // ---- live-output / change nav ----
-
-  Future<void> _openChange(String id) async {
-    if (widget.api != null && widget.org != null && widget.repo != null) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ChangeDiffScreen(
-          api: widget.api!,
-          org: widget.org!,
-          repo: widget.repo!,
-          changeId: id,
-          branch: widget.branch ?? '',
-        ),
-      ));
-      return;
-    }
-    widget.onOpenChange?.call(id);
-  }
-
-  /// build_id / task_id carry the live SSE task handle for long-running ops.
-  String? get _buildId {
-    for (final k in ['build_id', 'task_id', 'id']) {
-      final v = input[k];
-      if (v is String && v.isNotEmpty) return v;
-    }
-    return null;
-  }
-
-  bool get _isLongRunning =>
-      status == 'running' &&
-      (family == 'deploy' || toolId.startsWith('sandbox-job-wait') ||
-          toolId.startsWith('container-build'));
-
-  void _openLiveOutput() {
-    final bid = _buildId;
-    if (bid == null) return;
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => TaskProgressScreen(
-        api: widget.api!,
-        buildId: bid,
-        title: toolDisplayName(tool),
-      ),
-    ));
-  }
+  bool get _hasMeta =>
+      _changeId != null ||
+      _diff != null ||
+      (state?.additions != null && state!.additions! > 0) ||
+      (state?.deletions != null && state!.deletions! > 0) ||
+      (state?.error != null && (state!.error ?? '').isNotEmpty);
 
   @override
   Widget build(BuildContext context) {
     final colors = colorsOf(context);
     final text = textOf(context);
-    final dotColor = status == 'running'
-        ? colors.warning
-        : status == 'pending'
+    final dotColor = hasError
+        ? colors.destructive
+        : _running
             ? colors.warning
-            : hasError
-                ? colors.destructive
-                : colors.success;
-    final canNavChange = changeId != null &&
-        (widget.api != null && widget.org != null && widget.repo != null ||
-            widget.onOpenChange != null);
+            : colors.success;
+
     return Container(
       decoration: BoxDecoration(
         color: hasError
             ? colors.destructive.withValues(alpha: 0.05)
-            : colors.background.withValues(alpha: 0.5),
-        border: Border.all(
-            color: hasError
-                ? colors.destructive.withValues(alpha: 0.4)
-                : colors.border.withValues(alpha: 0.5)),
+            : colors.muted.withValues(alpha: 0.35),
         borderRadius: AppRadius.rSm,
       ),
       child: Column(
@@ -267,29 +118,33 @@ class _ToolPartViewState extends State<ToolPartView> {
         children: [
           InkWell(
             onTap: () => setState(() => _open = !_open),
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(AppRadius.sm),
-              bottom: _open ? Radius.zero : Radius.circular(AppRadius.sm),
-            ),
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm, vertical: AppSpacing.xs + 2),
+                  horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
               child: Row(
                 children: [
-                  Container(
-                      width: 6,
-                      height: 6,
-                      decoration:
-                          BoxDecoration(color: dotColor, shape: BoxShape.circle)),
-                  const SizedBox(width: AppSpacing.sm),
+                  Icon(
+                    hasError
+                        ? Icons.error_rounded
+                        : _running
+                            ? Icons.more_horiz_rounded
+                            : Icons.check_circle_rounded,
+                    size: 14,
+                    color: dotColor,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
                   ToolIcon(tool),
                   const SizedBox(width: AppSpacing.xs),
-                  Text(toolDisplayName(tool),
-                      style: text.mono.copyWith(
-                          fontSize: 12, fontWeight: FontWeight.w500)),
+                  Expanded(
+                    child: Text(toolDisplayName(tool),
+                        overflow: TextOverflow.ellipsis,
+                        style: text.meta.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: colors.mutedForeground)),
+                  ),
                   if ((state?.title ?? '').isNotEmpty) ...[
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
+                    const SizedBox(width: AppSpacing.xs),
+                    Flexible(
                       child: Text(state!.title!,
                           overflow: TextOverflow.ellipsis,
                           style: text.micro.copyWith(
@@ -297,336 +152,81 @@ class _ToolPartViewState extends State<ToolPartView> {
                               fontStyle: FontStyle.italic)),
                     ),
                   ],
-                  const Spacer(),
-                  // Live-output entry for running long tasks.
-                  if (_isLongRunning && widget.api != null) ...[
-                    InkWell(
-                      borderRadius: AppRadius.rSm,
-                      onTap: _openLiveOutput,
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.terminal_rounded,
-                                size: 12, color: colors.warning),
-                            const SizedBox(width: 2),
-                            Text(context.l10n.viewOutput,
-                                style: text.micro.copyWith(
-                                    fontSize: 10, color: colors.warning)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                  ] else
-                    const Spacer(),
                   Icon(
                     _open
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
                     size: 14,
                     color: colors.mutedForeground,
                   ),
-                  if (changeId != null && canNavChange) ...[
-                    const SizedBox(width: AppSpacing.xs),
-                    InkWell(
-                      onTap: () => _openChange(changeId!),
-                      borderRadius: AppRadius.rSm,
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.commit_rounded,
-                                size: 13, color: colors.primary),
-                            const SizedBox(width: 2),
-                            Text(changeId!.substring(0, 8),
-                                style: text.mono.copyWith(
-                                    fontSize: 10, color: colors.primary)),
-                          ],
-                        ),
+                ],
+              ),
+            ),
+          ),
+          if (_open) ...[
+            if (input.isNotEmpty)
+              _Section(
+                title: context.l10n.toolInputParams,
+                icon: Icons.data_object_rounded,
+                open: _inputOpen,
+                onToggle: () => setState(() => _inputOpen = !_inputOpen),
+                child: _MonoText(_prettyJson(input)),
+              ),
+            if (hasError)
+              _Section(
+                title: context.l10n.error,
+                icon: Icons.error_outline_rounded,
+                open: true,
+                onToggle: () {},
+                destructive: true,
+                child: _MonoText(state!.error ?? '', destructive: true),
+              ),
+            _Section(
+              title: context.l10n.content,
+              icon: Icons.description_outlined,
+              open: _contentOpen,
+              onToggle: () => setState(() => _contentOpen = !_contentOpen),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_running)
+                    Text(context.l10n.running,
+                        style: text.micro.copyWith(
+                            color: colors.mutedForeground,
+                            fontStyle: FontStyle.italic))
+                  else if ((state?.output ?? '').isNotEmpty)
+                    _MonoText(state!.output!),
+                  // Fixed media fields from the tool result `data` (e.g.
+                  // images / videos / audio emitted by the generation tools)
+                  // render as first-class media, not text.
+                  for (final ref in _mediaRefs(part))
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.xs),
+                      child: MediaCard(
+                        api: _api!,
+                        code: ref.code,
+                        name: ref.name,
+                        mime: ref.mime,
                       ),
                     ),
-                  ],
                 ],
               ),
             ),
-          ),
-          if (_open)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.sm, 0, AppSpacing.sm, AppSpacing.sm),
-              child: _body(context),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _body(BuildContext context) {
-    final colors = colorsOf(context);
-    final text = textOf(context);
-    final children = <Widget>[];
-
-    // Error: only the input parameters + the error message.
-    if (hasError) {
-      if (input.isNotEmpty) children.add(_inputParamsPanel(input, _paramsOpen));
-      if (state?.error != null) {
-        children.add(Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppSpacing.sm),
-          decoration: BoxDecoration(
-            color: colors.destructive.withValues(alpha: 0.12),
-            borderRadius: AppRadius.rSm,
-          ),
-          child: SelectableText(state!.error!,
-              style: text.mono.copyWith(
-                  fontSize: 11, color: colors.destructive)),
-        ));
-      }
-      return Column(
-          crossAxisAlignment: CrossAxisAlignment.start, children: children);
-    }
-
-    // Success: input parameters → result metadata → result content.
-    // read: instead of the raw JSON panel, show a compact summary bar (path +
-    // org:repo:branch + offset/limit range) that is always visible; the
-    // content (folded by default) sits below it.
-    if (input.isNotEmpty) {
-      if (tool == 'read') {
-        children.add(_readSummary());
-      } else {
-        children.add(_inputParamsPanel(input, _paramsOpen));
-      }
-    }
-
-    // Result metadata (change_id / diff / additions-deletions).
-    if (changeId != null) {
-      children.add(Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.commit_rounded, size: 13, color: colors.primary),
-            const SizedBox(width: AppSpacing.xs),
-            Text(changeId!.substring(0, 8),
-                style: text.mono.copyWith(fontSize: 11, color: colors.primary)),
+            if (_hasMeta)
+              _Section(
+                title: context.l10n.metadata,
+                icon: Icons.info_outline_rounded,
+                open: _metaOpen,
+                onToggle: () => setState(() => _metaOpen = !_metaOpen),
+                child: _MetaBody(
+                  changeId: _changeId,
+                  diff: _diff,
+                  additions: state?.additions,
+                  deletions: state?.deletions,
+                ),
+              ),
           ],
-        ),
-      ));
-    }
-    if (state?.diff != null && (state!.diff?.isNotEmpty ?? false)) {
-      children.add(Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-        child: _InlineDiff(diffText: state!.diff!),
-      ));
-    }
-    final additions = state?.additions;
-    final deletions = state?.deletions;
-    if ((additions != null && additions > 0) ||
-        (deletions != null && deletions > 0)) {
-      children.add(Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-        child: Text(
-          '+${additions ?? 0} -${deletions ?? 0}',
-          style: text.mono.copyWith(
-              fontSize: 11,
-              color: (deletions ?? 0) > 0
-                  ? colors.destructive
-                  : colors.success),
-        ),
-      ));
-    }
-
-    // Result content.
-    final output = state?.output;
-    if (output != null && output.isNotEmpty) {
-      if (tool == 'read' && widget.org != null && widget.repo != null) {
-        // read: show a highlighted, line-numbered, auto-wrapping code block.
-        children.add(_readContent(context, output));
-      } else {
-        children.add(Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppSpacing.xs),
-          constraints: const BoxConstraints(maxHeight: 220),
-          child: SingleChildScrollView(
-            child: SelectableText(fmtOutput(output),
-                style: text.mono.copyWith(fontSize: 11)),
-          ),
-        ));
-      }
-    } else if (widget.isStreaming && status == 'running') {
-      children.add(Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-        child: Text(context.l10n.running,
-            style: text.micro.copyWith(
-                color: colors.mutedForeground,
-                fontStyle: FontStyle.italic)),
-      ));
-    }
-
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.start, children: children);
-  }
-
-  Widget _code(BuildContext context, String text) {
-    final colors = colorsOf(context);
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: colors.muted,
-        borderRadius: AppRadius.rSm,
-      ),
-      child: SelectableText(text,
-          style: textOf(context).mono.copyWith(fontSize: 11)),
-    );
-  }
-
-  /// read results carry their own "N: " line-number prefix in the output; re-flow
-  /// them into an independent VsCode-style gutter so the number is separated
-  /// from the content and highlighted, rather than embedded in the text.
-  Widget _readContent(BuildContext context, String output) {
-    final path = _s(input['path']);
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(maxHeight: 300),
-      decoration: BoxDecoration(
-        color: colorsOf(context).muted.withValues(alpha: 0.4),
-        borderRadius: AppRadius.rSm,
-      ),
-      padding: const EdgeInsets.all(AppSpacing.xs),
-      child: SingleChildScrollView(
-        child: CodeView(
-          code: output,
-          filepath: path.isEmpty ? 'x.txt' : path,
-          shrinkWrap: true,
-          showLineNumbers: true,
-          numbered: CodeView.parseNumbered(output),
-        ),
-      ),
-    );
-  }
-
-  /// Always-visible metadata bar for a read call: org:repo:branch → path,
-  /// plus the offset/limit line range when present. Sits above the folded
-  /// content so the user sees what was read without expanding.
-  Widget _readSummary() {
-    final colors = colorsOf(context);
-    final text = textOf(context);
-    final path = _s(input['path']);
-    final org = _s(widget.org);
-    final repo = _s(widget.repo);
-    final bm = _s(widget.branch);
-    final offset = _asInt(input['offset']) ?? 1;
-    final limit = _asInt(input['limit']);
-    final scope = <String>[
-      if (org.isNotEmpty) org,
-      if (repo.isNotEmpty) repo,
-      if (bm.isNotEmpty) bm,
-    ].join(':');
-    // Line range displayed: from `offset`, extending `limit` lines when given.
-    final range = limit != null && limit > 0
-        ? 'L$offset-${offset + limit - 1}'
-        : 'L$offset';
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-      decoration: BoxDecoration(
-        border: Border.all(color: colors.border.withValues(alpha: 0.5)),
-        borderRadius: AppRadius.rSm,
-        color: colors.background.withValues(alpha: 0.35),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.description_outlined,
-              size: 13, color: colors.mutedForeground),
-          const SizedBox(width: AppSpacing.xs),
-          if (scope.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: AppSpacing.xs),
-              child: Text(scope,
-                  style: text.micro.copyWith(color: colors.mutedForeground)),
-            ),
-          Expanded(
-            child: Text(path,
-                overflow: TextOverflow.ellipsis,
-                style: text.mono.copyWith(
-                    fontSize: 11, color: colors.foreground)),
-          ),
-          if (range.isNotEmpty)
-            Text(range,
-                style: text.mono.copyWith(
-                    fontSize: 10, color: colors.mutedForeground)),
-        ],
-      ),
-    );
-  }
-
-  /// int-typed accessors for the read summary.
-  int? _asInt(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
-
-  /// A compact collapsible panel showing a tool call's input parameters JSON.
-  Widget _inputParamsPanel(Map<String, dynamic> input, bool expanded) {
-    final colors = colorsOf(context);
-    final text = textOf(context);
-    final json = _prettyJson(input);
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-      decoration: BoxDecoration(
-        border: Border.all(color: colors.border.withValues(alpha: 0.5)),
-        borderRadius: AppRadius.rSm,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.vertical(
-                top: Radius.circular(AppRadius.sm)),
-            onTap: () => setState(() => _paramsOpen = !_paramsOpen),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-              child: Row(
-                children: [
-                  Icon(
-                    expanded
-                        ? Icons.keyboard_arrow_down_rounded
-                        : Icons.keyboard_arrow_right_rounded,
-                    size: 14,
-                    color: colors.mutedForeground,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Icon(Icons.data_object_rounded,
-                      size: 13, color: colors.primary),
-                  const SizedBox(width: AppSpacing.xs),
-                  Text(context.l10n.toolInputParams,
-                      style: text.micro.copyWith(color: colors.mutedForeground)),
-                ],
-              ),
-            ),
-          ),
-          if (expanded)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                child: SelectableText(json,
-                    style: text.mono.copyWith(fontSize: 11)),
-              ),
-            ),
         ],
       ),
     );
@@ -641,70 +241,79 @@ class _ToolPartViewState extends State<ToolPartView> {
   }
 }
 
-/// Compact inline diff (parse + render) inside a tool card, with a small
-/// changeId chip. Tap opens the full change-comparison screen.
-class _InlineDiff extends StatefulWidget {
-  final String diffText;
-  const _InlineDiff({required this.diffText});
-
-  @override
-  State<_InlineDiff> createState() => _InlineDiffState();
-}
-
-class _InlineDiffState extends State<_InlineDiff> {
-  bool _expanded = false;
+/// A collapsible labelled section inside a tool card.
+class _Section extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final bool open;
+  final VoidCallback? onToggle;
+  final Widget child;
+  final bool destructive;
+  const _Section({
+    required this.title,
+    required this.icon,
+    required this.open,
+    required this.onToggle,
+    required this.child,
+    this.destructive = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colors = colorsOf(context);
-    final files = parseDiff(widget.diffText);
-    final summary = files.map((f) => f.filename).take(3).join(', ');
-    final count = files.length;
+    final text = textOf(context);
     return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(
+          AppSpacing.sm, 0, AppSpacing.sm, AppSpacing.sm),
       decoration: BoxDecoration(
-        border: Border.all(color: colors.border.withValues(alpha: 0.5)),
+        color: colors.background.withValues(alpha: 0.5),
+        border: Border.all(
+            color: destructive
+                ? colors.destructive.withValues(alpha: 0.4)
+                : colors.border.withValues(alpha: 0.5)),
         borderRadius: AppRadius.rSm,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            borderRadius: BorderRadius.vertical(
-                top: Radius.circular(AppRadius.sm)),
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: onToggle,
+            borderRadius:
+                BorderRadius.vertical(top: Radius.circular(AppRadius.sm)),
             child: Padding(
               padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
               child: Row(
                 children: [
                   Icon(
-                    _expanded
+                    open
                         ? Icons.keyboard_arrow_down_rounded
                         : Icons.keyboard_arrow_right_rounded,
                     size: 14,
                     color: colors.mutedForeground,
                   ),
                   const SizedBox(width: AppSpacing.xs),
-                  Icon(Icons.difference_rounded,
-                      size: 13, color: colors.primary),
+                  Icon(icon,
+                      size: 13,
+                      color: destructive
+                          ? colors.destructive
+                          : colors.primary),
                   const SizedBox(width: AppSpacing.xs),
-                  Expanded(
-                    child: Text(
-                        '$count 文件${summary.isEmpty ? '' : ' · $summary'}',
-                        overflow: TextOverflow.ellipsis,
-                        style: textOf(context)
-                            .micro
-                            .copyWith(color: colors.mutedForeground)),
-                  ),
+                  Text(title,
+                      style: text.micro.copyWith(
+                          color: destructive
+                              ? colors.destructive
+                              : colors.mutedForeground)),
                 ],
               ),
             ),
           ),
-          if (_expanded)
+          if (open)
             Padding(
-              padding: const EdgeInsets.only(
-                  left: AppSpacing.sm, right: AppSpacing.sm, bottom: AppSpacing.sm),
-              child: DiffView(diffText: widget.diffText),
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.sm, 0, AppSpacing.sm, AppSpacing.sm),
+              child: child,
             ),
         ],
       ),
@@ -712,84 +321,127 @@ class _InlineDiffState extends State<_InlineDiff> {
   }
 }
 
-/// Fetches an image by code and shows a small tappable thumbnail inside a
-/// tool card (e.g. the input image of an image_read tool call).
-class _InputImage extends StatefulWidget {
-  final String code;
-  final EasyLabApi? api;
-  final double maxWidth;
-  const _InputImage({required this.code, this.api, this.maxWidth = 160});
-
-  @override
-  State<_InputImage> createState() => _InputImageState();
-}
-
-class _InputImageState extends State<_InputImage> {
-  Uint8List? _bytes;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final api = widget.api;
-    if (api == null || widget.code.isEmpty) return;
-    try {
-      final b = await api.fetchFileBytes(widget.code);
-      if (mounted) setState(() => _bytes = Uint8List.fromList(b));
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    }
-  }
+/// Selectable mono text with scroll for the input / content / metadata body.
+class _MonoText extends StatelessWidget {
+  final String text;
+  final bool destructive;
+  const _MonoText(this.text, {this.destructive = false});
 
   @override
   Widget build(BuildContext context) {
     final colors = colorsOf(context);
-    if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-        child: Text('${context.l10n.image}: $_error',
-            style: textOf(context)
-                .micro
-                .copyWith(color: colors.mutedForeground, fontSize: 10)),
-      );
+    final colors2 = textOf(context);
+    if (text.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 220),
+      padding: const EdgeInsets.all(AppSpacing.xs),
+      child: SingleChildScrollView(
+        child: SelectableText(text,
+            style: colors2.mono.copyWith(
+                fontSize: 11,
+                color: destructive ? colors.destructive : colors.foreground)),
+      ),
+    );
+  }
+}
+
+/// Metadata body: change id, diff, +/- additions/deletions as plain text.
+class _MetaBody extends StatelessWidget {
+  final String? changeId;
+  final String? diff;
+  final int? additions;
+  final int? deletions;
+  const _MetaBody({
+    this.changeId,
+    this.diff,
+    this.additions,
+    this.deletions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = colorsOf(context);
+    final text = textOf(context);
+    final rows = <Widget>[];
+    if (changeId != null) {
+      rows.add(_Row(
+        icon: Icons.commit_rounded,
+        label: 'change_id',
+        value: changeId!,
+        color: colors.primary,
+      ));
     }
-    final b = _bytes;
-    if (b == null) {
-      return Container(
-        width: 120,
-        height: 80,
-        margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+    if ((additions != null && additions! > 0) ||
+        (deletions != null && deletions! > 0)) {
+      rows.add(_Row(
+        icon: Icons.difference_rounded,
+        label: 'diff',
+        value: '+${additions ?? 0} -${deletions ?? 0}',
+        color: (deletions ?? 0) > 0 ? colors.destructive : colors.success,
+      ));
+    }
+    if (diff != null && diff!.isNotEmpty) {
+      rows.add(Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: AppSpacing.xs),
+        padding: const EdgeInsets.all(AppSpacing.xs),
+        constraints: const BoxConstraints(maxHeight: 220),
         decoration: BoxDecoration(
           color: colors.muted.withValues(alpha: 0.4),
           borderRadius: AppRadius.rSm,
         ),
-        child: const Center(
-            child: SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2))),
-      );
+        child: SingleChildScrollView(
+          child: SelectableText(diff!,
+              style: text.mono.copyWith(fontSize: 11)),
+        ),
+      ));
     }
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-      child: InkWell(
-        onTap: () => showDialog<void>(
-          context: context,
-          builder: (_) => Dialog(
-            insetPadding: const EdgeInsets.all(16),
-            child: InteractiveViewer(child: Image.memory(b)),
+    return Column(
+        crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+  }
+}
+
+class _Row extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  const _Row({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = colorsOf(context);
+    final text = textOf(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: Row(
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: AppSpacing.xs),
+          Text(label,
+              style: text.micro.copyWith(color: colors.mutedForeground)),
+          const SizedBox(width: AppSpacing.sm),
+          Flexible(
+            child: Text(value,
+                overflow: TextOverflow.ellipsis,
+                style: text.mono.copyWith(fontSize: 11, color: color)),
           ),
-        ),
-        child: ClipRRect(
-          borderRadius: AppRadius.rSm,
-          child: Image.memory(b,
-              width: widget.maxWidth, fit: BoxFit.cover, cacheWidth: 640),
-        ),
+        ],
       ),
     );
   }
+}
+
+/// A file reference emitted in a tool result's `data`.
+class MediaRef {
+  final String code;
+  final String? mime;
+  final String? name;
+  const MediaRef({required this.code, this.mime, this.name});
 }

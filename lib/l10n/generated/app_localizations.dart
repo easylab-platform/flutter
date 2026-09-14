@@ -101,7 +101,7 @@ abstract class AppLocalizations {
   /// No description provided for @appTitle.
   ///
   /// In zh, this message translates to:
-  /// **'ZergX'**
+  /// **'Agent'**
   String get appTitle;
 
   /// No description provided for @gatewayUrl.
@@ -137,7 +137,7 @@ abstract class AppLocalizations {
   /// No description provided for @searchHint.
   ///
   /// In zh, this message translates to:
-  /// **'搜索会话 / org / repo / 分支'**
+  /// **'搜索会话名称'**
   String get searchHint;
 
   /// No description provided for @createNewOrg.
@@ -290,6 +290,18 @@ abstract class AppLocalizations {
   /// **'撤销'**
   String get undo;
 
+  /// No description provided for @retry.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试'**
+  String get retry;
+
+  /// No description provided for @editMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑消息'**
+  String get editMessage;
+
   /// No description provided for @undoTitle.
   ///
   /// In zh, this message translates to:
@@ -368,6 +380,18 @@ abstract class AppLocalizations {
   /// **'添加附件'**
   String get attach;
 
+  /// No description provided for @dropToAttach.
+  ///
+  /// In zh, this message translates to:
+  /// **'松开以添加为附件'**
+  String get dropToAttach;
+
+  /// No description provided for @folderNotAllowed.
+  ///
+  /// In zh, this message translates to:
+  /// **'不支持拖入文件夹——请拖入单个文件'**
+  String get folderNotAllowed;
+
   /// No description provided for @image.
   ///
   /// In zh, this message translates to:
@@ -397,6 +421,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'附件仍在上传中，请稍候'**
   String get waitUpload;
+
+  /// No description provided for @uploadFailedRetry.
+  ///
+  /// In zh, this message translates to:
+  /// **'{arg1} 个附件上传失败——请重试或移除后再发送'**
+  String uploadFailedRetry(String arg1);
 
   /// No description provided for @downloaded.
   ///
@@ -530,6 +560,18 @@ abstract class AppLocalizations {
   /// **'模型'**
   String get modelLabel;
 
+  /// No description provided for @variantLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'推理档位'**
+  String get variantLabel;
+
+  /// No description provided for @variantNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认（不指定档位）'**
+  String get variantNone;
+
   /// No description provided for @presetLabel.
   ///
   /// In zh, this message translates to:
@@ -559,6 +601,186 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'删除会话\"{arg1}\"？'**
   String deleteSessionBody(String arg1);
+
+  /// No description provided for @deleteSessionsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除会话'**
+  String get deleteSessionsTitle;
+
+  /// No description provided for @deleteSessionsBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除选中的 {arg1} 个会话？此操作不可撤销。'**
+  String deleteSessionsBody(String arg1);
+
+  /// No description provided for @selectSessions.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择'**
+  String get selectSessions;
+
+  /// No description provided for @selectAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'全选'**
+  String get selectAll;
+
+  /// No description provided for @selectNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消全选'**
+  String get selectNone;
+
+  /// No description provided for @selectedCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'已选 {arg1} 项'**
+  String selectedCount(String arg1);
+
+  /// No description provided for @addModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加模型'**
+  String get addModel;
+
+  /// No description provided for @noTest.
+  ///
+  /// In zh, this message translates to:
+  /// **'不可测试'**
+  String get noTest;
+
+  /// No description provided for @holdToTalk.
+  ///
+  /// In zh, this message translates to:
+  /// **'按住说话'**
+  String get holdToTalk;
+
+  /// No description provided for @releaseToSend.
+  ///
+  /// In zh, this message translates to:
+  /// **'松开发送'**
+  String get releaseToSend;
+
+  /// No description provided for @abort.
+  ///
+  /// In zh, this message translates to:
+  /// **'中止'**
+  String get abort;
+
+  /// No description provided for @edit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑'**
+  String get edit;
+
+  /// No description provided for @voiceMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'语音'**
+  String get voiceMode;
+
+  /// No description provided for @keyboardMode.
+  ///
+  /// In zh, this message translates to:
+  /// **'键盘'**
+  String get keyboardMode;
+
+  /// No description provided for @sessionInfo.
+  ///
+  /// In zh, this message translates to:
+  /// **'会话信息'**
+  String get sessionInfo;
+
+  /// No description provided for @voiceStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止并发送'**
+  String get voiceStop;
+
+  /// No description provided for @voiceRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音中…'**
+  String get voiceRecording;
+
+  /// No description provided for @voicePermission.
+  ///
+  /// In zh, this message translates to:
+  /// **'未获得麦克风权限'**
+  String get voicePermission;
+
+  /// No description provided for @recordVoice.
+  ///
+  /// In zh, this message translates to:
+  /// **'录制语音'**
+  String get recordVoice;
+
+  /// No description provided for @voiceTooShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音太短'**
+  String get voiceTooShort;
+
+  /// No description provided for @uploading.
+  ///
+  /// In zh, this message translates to:
+  /// **'上传中…'**
+  String get uploading;
+
+  /// No description provided for @uploadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'上传失败'**
+  String get uploadFailed;
+
+  /// No description provided for @capText.
+  ///
+  /// In zh, this message translates to:
+  /// **'文本'**
+  String get capText;
+
+  /// No description provided for @capImage.
+  ///
+  /// In zh, this message translates to:
+  /// **'图像'**
+  String get capImage;
+
+  /// No description provided for @capVideo.
+  ///
+  /// In zh, this message translates to:
+  /// **'视频'**
+  String get capVideo;
+
+  /// No description provided for @capSpeech.
+  ///
+  /// In zh, this message translates to:
+  /// **'语音'**
+  String get capSpeech;
+
+  /// No description provided for @capTranscription.
+  ///
+  /// In zh, this message translates to:
+  /// **'转写'**
+  String get capTranscription;
+
+  /// No description provided for @capEmbedding.
+  ///
+  /// In zh, this message translates to:
+  /// **'向量'**
+  String get capEmbedding;
+
+  /// No description provided for @capReranking.
+  ///
+  /// In zh, this message translates to:
+  /// **'重排'**
+  String get capReranking;
+
+  /// No description provided for @capRealtime.
+  ///
+  /// In zh, this message translates to:
+  /// **'实时'**
+  String get capRealtime;
 
   /// No description provided for @newOrg.
   ///
@@ -761,31 +983,31 @@ abstract class AppLocalizations {
   /// No description provided for @switchBackend.
   ///
   /// In zh, this message translates to:
-  /// **'切换后端'**
+  /// **'切换用户'**
   String get switchBackend;
 
   /// No description provided for @backendsTitle.
   ///
   /// In zh, this message translates to:
-  /// **'后端'**
+  /// **'用户'**
   String get backendsTitle;
 
   /// No description provided for @noSavedBackends.
   ///
   /// In zh, this message translates to:
-  /// **'暂无已保存的后端。'**
+  /// **'暂无已保存的用户。'**
   String get noSavedBackends;
 
   /// No description provided for @addBackend.
   ///
   /// In zh, this message translates to:
-  /// **'添加新后端'**
+  /// **'添加新用户'**
   String get addBackend;
 
   /// No description provided for @deleteBackend.
   ///
   /// In zh, this message translates to:
-  /// **'移除后端'**
+  /// **'移除用户'**
   String get deleteBackend;
 
   /// No description provided for @backendSection.
@@ -1784,6 +2006,12 @@ abstract class AppLocalizations {
   /// **'上下文'**
   String get contextLengthLabel;
 
+  /// No description provided for @contextLengthRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'必须填写上下文长度（正整数）。'**
+  String get contextLengthRequired;
+
   /// No description provided for @add.
   ///
   /// In zh, this message translates to:
@@ -1825,6 +2053,174 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'输入参数'**
   String get toolInputParams;
+
+  /// No description provided for @content.
+  ///
+  /// In zh, this message translates to:
+  /// **'内容'**
+  String get content;
+
+  /// No description provided for @metadata.
+  ///
+  /// In zh, this message translates to:
+  /// **'元数据'**
+  String get metadata;
+
+  /// No description provided for @newSession.
+  ///
+  /// In zh, this message translates to:
+  /// **'新会话'**
+  String get newSession;
+
+  /// No description provided for @noSessions.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无会话'**
+  String get noSessions;
+
+  /// No description provided for @apiTypeGateway.
+  ///
+  /// In zh, this message translates to:
+  /// **'Vercel AI 网关'**
+  String get apiTypeGateway;
+
+  /// No description provided for @providersSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'文本供应商'**
+  String get providersSection;
+
+  /// No description provided for @gatewaySection.
+  ///
+  /// In zh, this message translates to:
+  /// **'多模态网关'**
+  String get gatewaySection;
+
+  /// No description provided for @gatewayTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 网关'**
+  String get gatewayTitle;
+
+  /// No description provided for @gatewayHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'唯一的 Vercel 兼容网关。文本模型需要上下文长度；无上下文长度的模型（图像/视频/语音/转写）供工具使用。'**
+  String get gatewayHint;
+
+  /// No description provided for @gatewayModelsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加网关模型：文本模型填上下文长度，多模态模型留空。'**
+  String get gatewayModelsHint;
+
+  /// No description provided for @multimodal.
+  ///
+  /// In zh, this message translates to:
+  /// **'多模态'**
+  String get multimodal;
+
+  /// No description provided for @contextOptional.
+  ///
+  /// In zh, this message translates to:
+  /// **'可选 — 留空表示多模态模型'**
+  String get contextOptional;
+
+  /// No description provided for @testAs.
+  ///
+  /// In zh, this message translates to:
+  /// **'测试方式'**
+  String get testAs;
+
+  /// No description provided for @modelNameLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示名称…'**
+  String get modelNameLabel;
+
+  /// No description provided for @discoverModels.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动识别模型'**
+  String get discoverModels;
+
+  /// No description provided for @discoveringModels.
+  ///
+  /// In zh, this message translates to:
+  /// **'识别中…'**
+  String get discoveringModels;
+
+  /// No description provided for @discoveredModels.
+  ///
+  /// In zh, this message translates to:
+  /// **'已识别 {arg1} 个模型'**
+  String discoveredModels(Object arg1);
+
+  /// No description provided for @gatewayTextModels.
+  ///
+  /// In zh, this message translates to:
+  /// **'文本 / 视觉模型'**
+  String get gatewayTextModels;
+
+  /// No description provided for @gatewayTextModelsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加语言模型（需要上下文长度）。'**
+  String get gatewayTextModelsHint;
+
+  /// No description provided for @gatewayMultimodalModels.
+  ///
+  /// In zh, this message translates to:
+  /// **'多模态模型'**
+  String get gatewayMultimodalModels;
+
+  /// No description provided for @gatewayMultimodalModelsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加图像/视频/语音/转写模型（无上下文长度）。'**
+  String get gatewayMultimodalModelsHint;
+
+  /// No description provided for @authExpiredTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'认证失败'**
+  String get authExpiredTitle;
+
+  /// No description provided for @authExpiredBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器拒绝了请求：令牌缺失、无效或已被吊销。请在连接设置中更新令牌后重试。'**
+  String get authExpiredBody;
+
+  /// No description provided for @signInAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新登录'**
+  String get signInAgain;
+
+  /// No description provided for @defaults.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认项'**
+  String get defaults;
+
+  /// No description provided for @defaultsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建会话时自动使用（留空则用内置 default）'**
+  String get defaultsHint;
+
+  /// No description provided for @defaultModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认模型'**
+  String get defaultModel;
+
+  /// No description provided for @defaultPreset.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认预设'**
+  String get defaultPreset;
 
   /// No description provided for @tenantsSection.
   ///
@@ -1885,6 +2281,144 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暂无用户。'**
   String get tenantsEmpty;
+
+  /// No description provided for @mergeRequests.
+  ///
+  /// In zh, this message translates to:
+  /// **'合并请求'**
+  String get mergeRequests;
+
+  /// No description provided for @newMergeRequest.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建合并请求'**
+  String get newMergeRequest;
+
+  /// No description provided for @mrSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'源分支'**
+  String get mrSource;
+
+  /// No description provided for @mrTarget.
+  ///
+  /// In zh, this message translates to:
+  /// **'目标分支'**
+  String get mrTarget;
+
+  /// No description provided for @mrMerge.
+  ///
+  /// In zh, this message translates to:
+  /// **'合并'**
+  String get mrMerge;
+
+  /// No description provided for @mrClose.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get mrClose;
+
+  /// No description provided for @mrReopen.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新打开'**
+  String get mrReopen;
+
+  /// No description provided for @mrApproved.
+  ///
+  /// In zh, this message translates to:
+  /// **'已批准'**
+  String get mrApproved;
+
+  /// No description provided for @mrRequestChanges.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求修改'**
+  String get mrRequestChanges;
+
+  /// No description provided for @mrStateOpen.
+  ///
+  /// In zh, this message translates to:
+  /// **'开启'**
+  String get mrStateOpen;
+
+  /// No description provided for @mrStateMerged.
+  ///
+  /// In zh, this message translates to:
+  /// **'已合并'**
+  String get mrStateMerged;
+
+  /// No description provided for @mrStateClosed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已关闭'**
+  String get mrStateClosed;
+
+  /// No description provided for @collaborators.
+  ///
+  /// In zh, this message translates to:
+  /// **'协作者'**
+  String get collaborators;
+
+  /// No description provided for @addCollaborator.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加协作者'**
+  String get addCollaborator;
+
+  /// No description provided for @role.
+  ///
+  /// In zh, this message translates to:
+  /// **'角色'**
+  String get role;
+
+  /// No description provided for @roleOwner.
+  ///
+  /// In zh, this message translates to:
+  /// **'拥有者'**
+  String get roleOwner;
+
+  /// No description provided for @roleMaintainer.
+  ///
+  /// In zh, this message translates to:
+  /// **'维护者'**
+  String get roleMaintainer;
+
+  /// No description provided for @roleDeveloper.
+  ///
+  /// In zh, this message translates to:
+  /// **'开发者'**
+  String get roleDeveloper;
+
+  /// No description provided for @removeMember.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除'**
+  String get removeMember;
+
+  /// No description provided for @repoVisibility.
+  ///
+  /// In zh, this message translates to:
+  /// **'可见性'**
+  String get repoVisibility;
+
+  /// No description provided for @visibilityPublic.
+  ///
+  /// In zh, this message translates to:
+  /// **'公开'**
+  String get visibilityPublic;
+
+  /// No description provided for @visibilityPrivate.
+  ///
+  /// In zh, this message translates to:
+  /// **'私有'**
+  String get visibilityPrivate;
+
+  /// No description provided for @changeVisibility.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改可见性'**
+  String get changeVisibility;
 }
 
 class _AppLocalizationsDelegate

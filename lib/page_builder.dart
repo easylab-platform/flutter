@@ -2,55 +2,123 @@ import 'package:flutter/material.dart';
 
 import 'store.dart';
 import 'navigation.dart';
-import 'screens/session_list_page.dart';
 import 'screens/chat.dart';
+import 'screens/session_list_page.dart';
 import 'screens/chat_overlay_page.dart';
+import 'screens/config.dart';
 import 'screens/code_root_page.dart';
 import 'screens/code_repo_page.dart';
 import 'screens/code_file_page.dart';
-import 'screens/config.dart';
 import 'screens/containers.dart';
+import 'screens/preset_form.dart';
+import 'screens/providers.dart';
+import 'prefs.dart';
 
 /// Build the widget for a single [AppPage]. [isTablet] lets a page render its
 /// own back affordance only when it is the *current* (top) page of the last-two
 /// table split; the preceding page is context and shows no back.
 /// The config callbacks are only used for config pages.
-Widget buildPage(AppStore store, AppPage page,
-    {required bool isTablet,
-    required bool darkMode,
-    required ValueChanged<bool> onDarkMode,
-    required VoidCallback? onSwitchBackend}) {
+Widget buildPage(
+  AppStore store,
+  AppPage page, {
+  required bool isTablet,
+  required bool darkMode,
+  required ValueChanged<bool> onDarkMode,
+  required VoidCallback? onSwitchBackend,
+  void Function(BackendCfg)? onBackendSwitched,
+}) {
   switch (page) {
     case ChatListPage():
-      return SessionListPage(store: store);
+      return SessionListPage(key: ValueKey(page.key), store: store);
     case ChatSessionPage():
-      return ChatSessionPageWidget(store: store);
+      return ChatSessionPageWidget(key: ValueKey(page.key), store: store);
     case ChatOverlayPage(:final overlay):
-      return ChatOverlayPageWidget(store: store, overlay: overlay);
+      return ChatOverlayPageWidget(
+        key: ValueKey(page.key),
+        store: store,
+        overlay: overlay,
+      );
     case CodeRootPage():
-      return CodeRootPageWidget(store: store);
+      return CodeRootPageWidget(key: ValueKey(page.key), store: store);
     case CodeRepoPage(:final org, :final repo, :final branch):
-      return CodeRepoPageWidget(store: store, org: org, repo: repo, branch: branch);
+      return CodeRepoPageWidget(
+          key: ValueKey(page.key), store: store, org: org, repo: repo, branch: branch);
     case CodeFilePage(:final path):
-      return CodeFilePageWidget(store: store, path: path);
+      return CodeFilePageWidget(key: ValueKey(page.key), store: store, path: path);
+    case ContainersRootPage():
+      return ContainersScreen(key: ValueKey(page.key), store: store);
     case ConfigRootPage():
       return ConfigScreen(
-          store: store, darkMode: darkMode, onDarkMode: onDarkMode, onSwitchBackend: onSwitchBackend);
+        key: ValueKey(page.key),
+        store: store,
+        darkMode: darkMode,
+        onDarkMode: onDarkMode,
+        onSwitchBackend: onSwitchBackend,
+        onBackendSwitched: onBackendSwitched,
+      );
     case ConfigSubPage(:final id):
       return ConfigScreen(
-          store: store, darkMode: darkMode, onDarkMode: onDarkMode, onSwitchBackend: onSwitchBackend, initialId: id);
-    case ContainersRootPage():
-      return ContainersScreen(store: store);
+        key: ValueKey(page.key),
+        store: store,
+        darkMode: darkMode,
+        onDarkMode: onDarkMode,
+        onSwitchBackend: onSwitchBackend,
+        onBackendSwitched: onBackendSwitched,
+        initialId: id,
+      );
+    case PresetFormPage():
+      return PresetFormScreen(
+        key: ValueKey(page.key),
+        store: store,
+        api: store.api,
+        showBack: isTablet,
+      );
+    case ProvidersListPage():
+      return ProvidersListScreen(
+        key: ValueKey(page.key),
+        store: store,
+        showBack: isTablet,
+      );
+    case ProviderFormPage():
+      return ProviderFormScreen(
+        key: ValueKey(page.key),
+        store: store,
+        showBack: isTablet,
+      );
+    case GatewayFormPage():
+      return GatewayFormScreen(
+        key: ValueKey(page.key),
+        store: store,
+        showBack: isTablet,
+      );
+    case ProviderModelsPage(:final modelId):
+      return ProviderModelScreen(
+        key: ValueKey(page.key),
+        store: store,
+        modelId: modelId,
+        showBack: isTablet,
+      );
+    case GatewayModelPage(:final modelId):
+      return GatewayModelScreen(
+        key: ValueKey(page.key),
+        store: store,
+        modelId: modelId,
+        showBack: isTablet,
+      );
   }
 }
 
 /// Build the widgets for the [lastCount] newest pages of [stack], oldest→newest.
 /// Phone uses 1 (the top); tablets use the last two (context + current).
-List<Widget> buildStackPages(AppStore store, List<AppPage> stack,
-    {required int lastCount,
-    required bool darkMode,
-    required ValueChanged<bool> onDarkMode,
-    required VoidCallback? onSwitchBackend}) {
+List<Widget> buildStackPages(
+  AppStore store,
+  List<AppPage> stack, {
+  required int lastCount,
+  required bool darkMode,
+  required ValueChanged<bool> onDarkMode,
+  required VoidCallback? onSwitchBackend,
+  void Function(BackendCfg)? onBackendSwitched,
+}) {
   final n = stack.length;
   if (n == 0) return const [];
   // Clamp: a stack shorter than [lastCount] shows whatever it has (never blank).
@@ -58,10 +126,14 @@ List<Widget> buildStackPages(AppStore store, List<AppPage> stack,
   final pages = stack.sublist(start);
   return [
     for (var i = 0; i < pages.length; i++)
-      buildPage(store, pages[i],
-          isTablet: i == pages.length - 1,
-          darkMode: darkMode,
-          onDarkMode: onDarkMode,
-          onSwitchBackend: onSwitchBackend),
+      buildPage(
+        store,
+        pages[i],
+        isTablet: i == pages.length - 1,
+        darkMode: darkMode,
+        onDarkMode: onDarkMode,
+        onSwitchBackend: onSwitchBackend,
+        onBackendSwitched: onBackendSwitched,
+      ),
   ];
 }

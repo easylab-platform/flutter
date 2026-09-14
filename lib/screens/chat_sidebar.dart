@@ -117,6 +117,8 @@ class _ChatSidebarState extends State<ChatSidebar> {
         : (s.org.isNotEmpty ? '${s.org}/${s.repo}/${s.branch}' : s.id);
     return SessionRow(
       session: s,
+      unread: store.isUnread(s),
+      unreadCount: store.unreadCountFor(s),
       isActive: isActive,
       subtitle: preview,
       onTap: () => store.pickSession(s.id),

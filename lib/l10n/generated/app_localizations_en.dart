@@ -10,7 +10,7 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get appTitle => 'ZergX';
+  String get appTitle => 'Agent';
 
   @override
   String get gatewayUrl => 'Gateway URL';
@@ -28,7 +28,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get search => 'Search';
 
   @override
-  String get searchHint => 'Search sessions / org / repo / branch';
+  String get searchHint => 'Search session name';
 
   @override
   String get createNewOrg => 'New organization';
@@ -108,6 +108,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get undo => 'Undo';
 
   @override
+  String get retry => 'Retry';
+
+  @override
+  String get editMessage => 'Edit message';
+
+  @override
   String get undoTitle => 'Undo this message?';
 
   @override
@@ -149,6 +155,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get attach => 'Attach file';
 
   @override
+  String get dropToAttach => 'Drop to add as attachment';
+
+  @override
+  String get folderNotAllowed =>
+      'Folders can\'t be attached — drop individual files';
+
+  @override
   String get image => 'image';
 
   @override
@@ -162,6 +175,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get waitUpload => 'Attachment is still uploading';
+
+  @override
+  String uploadFailedRetry(String arg1) {
+    return '$arg1 attachment(s) failed to upload — retry or remove them before sending';
+  }
 
   @override
   String get downloaded => 'Downloaded to';
@@ -230,6 +248,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get modelLabel => 'Model';
 
   @override
+  String get variantLabel => 'Reasoning variant';
+
+  @override
+  String get variantNone => 'Default (no variant)';
+
+  @override
   String get presetLabel => 'Preset';
 
   @override
@@ -245,6 +269,100 @@ class AppLocalizationsEn extends AppLocalizations {
   String deleteSessionBody(String arg1) {
     return 'Delete session \"$arg1\"?';
   }
+
+  @override
+  String get deleteSessionsTitle => 'Delete sessions';
+
+  @override
+  String deleteSessionsBody(String arg1) {
+    return 'Delete $arg1 selected sessions? This cannot be undone.';
+  }
+
+  @override
+  String get selectSessions => 'Select';
+
+  @override
+  String get selectAll => 'Select all';
+
+  @override
+  String get selectNone => 'Deselect all';
+
+  @override
+  String selectedCount(String arg1) {
+    return '$arg1 selected';
+  }
+
+  @override
+  String get addModel => 'Add model';
+
+  @override
+  String get noTest => 'No test';
+
+  @override
+  String get holdToTalk => 'Hold to talk';
+
+  @override
+  String get releaseToSend => 'Release to send';
+
+  @override
+  String get abort => 'Abort';
+
+  @override
+  String get edit => 'Edit';
+
+  @override
+  String get voiceMode => 'Voice';
+
+  @override
+  String get keyboardMode => 'Keyboard';
+
+  @override
+  String get sessionInfo => 'Session info';
+
+  @override
+  String get voiceStop => 'Stop & send';
+
+  @override
+  String get voiceRecording => 'Recording…';
+
+  @override
+  String get voicePermission => 'Microphone permission denied';
+
+  @override
+  String get recordVoice => 'Record voice';
+
+  @override
+  String get voiceTooShort => 'Recording too short';
+
+  @override
+  String get uploading => 'Uploading…';
+
+  @override
+  String get uploadFailed => 'Upload failed';
+
+  @override
+  String get capText => 'text';
+
+  @override
+  String get capImage => 'image';
+
+  @override
+  String get capVideo => 'video';
+
+  @override
+  String get capSpeech => 'speech';
+
+  @override
+  String get capTranscription => 'ASR';
+
+  @override
+  String get capEmbedding => 'embedding';
+
+  @override
+  String get capReranking => 'rerank';
+
+  @override
+  String get capRealtime => 'realtime';
 
   @override
   String get newOrg => 'New organization';
@@ -361,19 +479,19 @@ class AppLocalizationsEn extends AppLocalizations {
       'This clears the saved gateway URL and token and returns to the login screen.';
 
   @override
-  String get switchBackend => 'Switch backend';
+  String get switchBackend => 'Switch user';
 
   @override
-  String get backendsTitle => 'Backends';
+  String get backendsTitle => 'Users';
 
   @override
-  String get noSavedBackends => 'No saved backends yet.';
+  String get noSavedBackends => 'No saved users yet.';
 
   @override
-  String get addBackend => 'Add new backend';
+  String get addBackend => 'Add new user';
 
   @override
-  String get deleteBackend => 'Remove backend';
+  String get deleteBackend => 'Remove user';
 
   @override
   String get backendSection => 'Backend';
@@ -933,6 +1051,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get contextLengthLabel => 'context';
 
   @override
+  String get contextLengthRequired =>
+      'Context length is required (positive number).';
+
+  @override
   String get add => 'Add';
 
   @override
@@ -956,6 +1078,98 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get toolInputParams => 'Input';
+
+  @override
+  String get content => 'Content';
+
+  @override
+  String get metadata => 'Metadata';
+
+  @override
+  String get newSession => 'New session';
+
+  @override
+  String get noSessions => 'No sessions';
+
+  @override
+  String get apiTypeGateway => 'Vercel AI Gateway';
+
+  @override
+  String get providersSection => 'Text providers';
+
+  @override
+  String get gatewaySection => 'Multimodal gateway';
+
+  @override
+  String get gatewayTitle => 'AI Gateway';
+
+  @override
+  String get gatewayHint =>
+      'The single Vercel-compatible gateway. Text models need a context length; models without one (image/video/speech/transcription) are used by tools.';
+
+  @override
+  String get gatewayModelsHint =>
+      'Add the gateway\'s models: give text models a context length, leave multimodal models empty.';
+
+  @override
+  String get multimodal => 'multimodal';
+
+  @override
+  String get contextOptional => 'optional — empty marks a multimodal model';
+
+  @override
+  String get testAs => 'Test as';
+
+  @override
+  String get modelNameLabel => 'display name…';
+
+  @override
+  String get discoverModels => 'Auto-detect models';
+
+  @override
+  String get discoveringModels => 'Detecting…';
+
+  @override
+  String discoveredModels(Object arg1) {
+    return 'Discovered $arg1 models';
+  }
+
+  @override
+  String get gatewayTextModels => 'Text / vision models';
+
+  @override
+  String get gatewayTextModelsHint =>
+      'Add a language model (needs a context length).';
+
+  @override
+  String get gatewayMultimodalModels => 'Multimodal models';
+
+  @override
+  String get gatewayMultimodalModelsHint =>
+      'Add image/video/speech/transcription models (no context length).';
+
+  @override
+  String get authExpiredTitle => 'Sign-in required';
+
+  @override
+  String get authExpiredBody =>
+      'The server rejected the request: the token is missing, invalid, or revoked. Update the connection token and try again.';
+
+  @override
+  String get signInAgain => 'Sign in again';
+
+  @override
+  String get defaults => 'Defaults';
+
+  @override
+  String get defaultsHint =>
+      'Applied automatically to new sessions (empty = built-in default)';
+
+  @override
+  String get defaultModel => 'Default model';
+
+  @override
+  String get defaultPreset => 'Default preset';
 
   @override
   String get tenantsSection => 'USERS';
@@ -986,4 +1200,73 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tenantsEmpty => 'No users yet.';
+
+  @override
+  String get mergeRequests => 'Merge requests';
+
+  @override
+  String get newMergeRequest => 'New merge request';
+
+  @override
+  String get mrSource => 'Source branch';
+
+  @override
+  String get mrTarget => 'Target branch';
+
+  @override
+  String get mrMerge => 'Merge';
+
+  @override
+  String get mrClose => 'Close';
+
+  @override
+  String get mrReopen => 'Reopen';
+
+  @override
+  String get mrApproved => 'Approved';
+
+  @override
+  String get mrRequestChanges => 'Request changes';
+
+  @override
+  String get mrStateOpen => 'open';
+
+  @override
+  String get mrStateMerged => 'merged';
+
+  @override
+  String get mrStateClosed => 'closed';
+
+  @override
+  String get collaborators => 'Collaborators';
+
+  @override
+  String get addCollaborator => 'Add collaborator';
+
+  @override
+  String get role => 'Role';
+
+  @override
+  String get roleOwner => 'Owner';
+
+  @override
+  String get roleMaintainer => 'Maintainer';
+
+  @override
+  String get roleDeveloper => 'Developer';
+
+  @override
+  String get removeMember => 'Remove';
+
+  @override
+  String get repoVisibility => 'Visibility';
+
+  @override
+  String get visibilityPublic => 'Public';
+
+  @override
+  String get visibilityPrivate => 'Private';
+
+  @override
+  String get changeVisibility => 'Change visibility';
 }

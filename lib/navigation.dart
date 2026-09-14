@@ -11,13 +11,7 @@ import 'enums.dart';
 export 'enums.dart' show SessionOverlay, SiderTab;
 
 /// One view in a tab's navigation stack. An [AppPage] describes *which* view
-/// to show; the widget itself reads live state (active session, selected repo,
-/// file path…) from [AppStore]. The stack is per-tab: switching tabs keeps each
-/// tab's depth, and pop returns to the previous view in that tab. The [key]
-/// makes [AppStore.pushPage] replace an entry in place (no unbounded growth).
-///
-/// Tabs without multi-pane layouts (config uses its own internal sub-page
-/// stack, so it is rendered directly by the shell) use a single root page.
+/// to show; the widget itself reads live state from [AppStore].
 sealed class AppPage {
   final String? key;
   const AppPage([this.key]);
@@ -33,8 +27,7 @@ class ChatSessionPage extends AppPage {
   const ChatSessionPage() : super('chat_session');
 }
 
-/// Chat tab — a session sub-page (timeline / files / mailbox / container /
-/// todos). [overlay] selects which.
+/// Chat tab — a session sub-page (timeline / files / mailbox / container).
 class ChatOverlayPage extends AppPage {
   final SessionOverlay overlay;
   const ChatOverlayPage(this.overlay) : super('chat_overlay');
@@ -70,10 +63,44 @@ class ConfigRootPage extends AppPage {
   const ConfigRootPage() : super('config_root');
 }
 
-/// Config tab — a drill-in sub page (providers / presets / tools / …).
+/// Config tab — a drill-in sub page (providers / presets / tools / users / …).
 class ConfigSubPage extends AppPage {
   final String id;
   const ConfigSubPage(this.id) : super('config_sub_$id');
+}
+
+/// Config tab — the provider list (its own page with an add action in the bar).
+class ProvidersListPage extends AppPage {
+  const ProvidersListPage() : super('providers_list');
+}
+
+/// Config tab — create a NEW user preset on its own page.
+class PresetFormPage extends AppPage {
+  const PresetFormPage() : super('preset_form_new');
+}
+
+/// Config tab — add/edit a single provider's connection fields.
+class ProviderFormPage extends AppPage {
+  const ProviderFormPage() : super('provider_form');
+}
+
+/// Config tab — the single Vercel-compatible gateway form.
+class GatewayFormPage extends AppPage {
+  const GatewayFormPage() : super('gateway_form');
+}
+
+/// Config tab — a single model entry form.
+class ProviderModelsPage extends AppPage {
+  final String? modelId;
+  ProviderModelsPage({this.modelId})
+      : super('provider_model_${modelId ?? 'new'}');
+}
+
+/// Config tab — a single GATEWAY model entry form.
+class GatewayModelPage extends AppPage {
+  final String? modelId;
+  GatewayModelPage({this.modelId})
+      : super('gateway_model_${modelId ?? 'new'}');
 }
 
 /// The stack-bottom page for a given tab.

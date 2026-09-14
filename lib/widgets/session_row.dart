@@ -10,7 +10,10 @@ String wechatTime(BuildContext context, String iso) {
   final dt = DateTime.tryParse(iso)?.toLocal();
   if (dt == null) return '';
   final d = DateTime.now().difference(dt);
-  if (d.inMinutes < 1) return I18n.isZh ? '' : context.l10n.timeJustNow;
+  // Show a relative label for EVERY recent message — including "刚刚 / just
+  // now". (Previously zh returned '' for <1min, so a just-landed assistant
+  // message showed NO time at all.)
+  if (d.inMinutes < 1) return context.l10n.timeJustNow;
   if (d.inMinutes < 60) {
     return context.l10n.timeMinAgo('${d.inMinutes}');
   }
@@ -19,12 +22,23 @@ String wechatTime(BuildContext context, String iso) {
   return '${dt.month}/${dt.day}';
 }
 
-/// WeChat-style chat-list row: avatar | name + relative time | preview +
-/// unread badge. Reused by the home session list and the search results.
+/// IM-style chat-list row: avatar | name + relative time | preview + unread
+/// dot. Standalone variant: the avatar is seeded by the SESSION NAME (there is
+/// no org/repo/branch), and "unread" is a client-local watermark dot (the
+/// agent does not track read state).
 class SessionRow extends StatelessWidget {
   final Session session;
   final bool isActive;
   final String subtitle;
+  /// True when there is a newer message than the client's local read
+  /// watermark for this session.
+  final bool unread;
+  /// Number of unread messages (shown as a numeric badge when > 0).
+  final int unreadCount;
+  /// Selection mode: when true the row shows a leading checkbox instead of the
+  /// avatar and taps toggle selection rather than opening the session.
+  final bool selectable;
+  final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   const SessionRow({
@@ -32,8 +46,12 @@ class SessionRow extends StatelessWidget {
     required this.session,
     required this.isActive,
     required this.subtitle,
+    required this.unread,
     required this.onTap,
+    this.unreadCount = 0,
     this.onLongPress,
+    this.selectable = false,
+    this.selected = false,
   });
 
   @override
@@ -41,20 +59,35 @@ class SessionRow extends StatelessWidget {
     final colors = colorsOf(context);
     final text = textOf(context);
     final s = session;
-    final unread = s.unreadCount ?? 0;
-    final stamp =
-        wechatTime(context, s.lastMessageAt.isNotEmpty ? s.lastMessageAt : s.updatedAt);
+    final stamp = wechatTime(
+        context, s.lastMessageAt.isNotEmpty ? s.lastMessageAt : s.updatedAt);
     return Material(
-      color: isActive ? colors.primary.withValues(alpha: 0.10) : Colors.transparent,
+      color: selected
+          ? colors.primary.withValues(alpha: 0.14)
+          : isActive
+              ? colors.primary.withValues(alpha: 0.10)
+              : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
         child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: AppSpacing.sm),
           child: Row(
             children: [
-              ChatAvatar(org: s.org, repo: s.repo, branch: s.branch, radius: 20),
+              // In selection mode the avatar becomes a checkbox (tap toggles).
+              if (selectable) ...[
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: selected ? colors.primary : colors.mutedForeground,
+                  size: 24,
+                ),
+              ] else
+                // The avatar is seeded by the session name (branch slot), so a
+                // given session always renders the same color + honeycomb.
+                ChatAvatar(org: '', repo: '', branch: s.id, radius: 20),
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
@@ -64,10 +97,7 @@ class SessionRow extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            s.org.isNotEmpty
-                                ? '${s.org}/${s.repo}'
-                                    '${s.branch.isNotEmpty ? '/${s.branch}' : ''}'
-                                : s.id,
+                            s.id,
                             overflow: TextOverflow.ellipsis,
                             style: text.meta.copyWith(
                                 fontWeight: FontWeight.w600,
@@ -90,23 +120,9 @@ class SessionRow extends StatelessWidget {
                               style: text.micro
                                   .copyWith(color: colors.mutedForeground)),
                         ),
-                        if (unread > 0 && !isActive) ...[
+                        if (unread && !isActive && unreadCount > 0) ...[
                           const SizedBox(width: AppSpacing.xs),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 1),
-                            constraints: const BoxConstraints(minWidth: 16),
-                            decoration: BoxDecoration(
-                              color: colors.destructive,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text('$unread',
-                                style: text.micro.copyWith(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w700)),
-                          ),
+                          _UnreadBadge(count: unreadCount),
                         ],
                       ],
                     ),
@@ -116,6 +132,36 @@ class SessionRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Small red pill showing the unread count (99+ past 99). Mirrors an IM app.
+class _UnreadBadge extends StatelessWidget {
+  final int count;
+  const _UnreadBadge({required this.count});
+  @override
+  Widget build(BuildContext context) {
+    final colors = colorsOf(context);
+    final text = textOf(context);
+    final label = count > 99 ? '99+' : '$count';
+    return Container(
+      constraints: const BoxConstraints(minWidth: 18),
+      height: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: colors.destructive,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Text(
+        label,
+        style: text.micro.copyWith(
+            color: Colors.white,
+            fontSize: 10,
+            height: 1,
+            fontWeight: FontWeight.w600),
       ),
     );
   }

@@ -186,6 +186,8 @@ class _BrowserPageState extends State<BrowserPage> {
           for (final s in _hits)
             SessionRow(
               session: s,
+              unread: store.isUnread(s),
+              unreadCount: store.unreadCountFor(s),
               isActive: store.activeSessionId == s.id,
               subtitle: s.org.isNotEmpty
                   ? '${s.org}/${s.repo}/${s.branch}'

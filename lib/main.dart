@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'api.dart';
+import 'auth_gate.dart';
+import 'widgets/dialogs.dart';
 import 'enums.dart';
 import 'i18n.dart';
 import 'app_layout.dart';
 import 'page_builder.dart';
 import 'prefs.dart';
+import 'services/local_store.dart';
 import 'store.dart';
 import 'theme/app_theme.dart';
 
-const defaultBaseUrl = 'https://easylab.temp.10.199.64.20.nip.io';
-
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // media_kit (audio + video, all platforms) needs its native bindings
+  // initialized once before any Player is constructed.
+  MediaKit.ensureInitialized();
   runApp(const EasyLabApp());
 }
 
@@ -29,27 +35,45 @@ class _EasyLabAppState extends State<EasyLabApp> {
   bool _dark = true;
   AppStore? _store;
 
-  /// Root navigator key: lets root-level helpers (backend manager) show
-  /// sheets with a context BELOW MaterialApp — the State's own context is
-  /// above it and has no Navigator, which made the button do nothing.
-  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
-
   @override
   void initState() {
     super.initState();
+    onAuthExpired = _logout;
+    onAddUser = _logout;
     _load();
+  }
+
+  @override
+  void dispose() {
+    onAuthExpired = null;
+    onAddUser = null;
+    super.dispose();
   }
 
   Future<void> _load() async {
     // Load persisted locale before the first build.
     await I18n.load();
     await Prefs.loadAgentLocale();
+    await Prefs.loadReadWatermarks();
     final prefs = await Prefs.load();
-    final base = prefs.baseUrl?.isNotEmpty == true ? prefs.baseUrl! : defaultBaseUrl;
+    var base = prefs.baseUrl ?? '';
+    var token = prefs.token ?? '';
+    // Hosted-web defaults: a compile-time base URL (--dart-define) plus
+    // `?base=...&token=...` query params so a link can seed the connection
+    // (useful for the web build, harmless elsewhere).
+    const defaultBase = String.fromEnvironment('AGENT_BASE_URL');
+    if (base.isEmpty && defaultBase.isNotEmpty) base = defaultBase;
+    final qp = Uri.base.queryParameters;
+    if ((qp['base'] ?? '').isNotEmpty) base = qp['base']!;
+    if ((qp['token'] ?? '').isNotEmpty) token = qp['token']!;
+    if (base.isNotEmpty && token.isNotEmpty && base != (prefs.baseUrl ?? '')) {
+      // Persist so a refresh keeps the connection.
+      await Prefs.save(base, token);
+    }
     if (mounted) {
       setState(() {
         _baseUrl = base;
-        _token = prefs.token ?? '';
+        _token = token;
         _dark = prefs.darkMode;
       });
     }
@@ -83,84 +107,24 @@ class _EasyLabAppState extends State<EasyLabApp> {
     }
   }
 
-  /// Backend manager sheet: switch / delete saved backends, or add a new
-  /// one (which lands on the setup screen). The active backend is marked.
+  /// Backend manager: a dedicated page to switch / delete saved backends, or
+  /// add a new one (which lands on the setup screen). The active backend is
+  /// marked. Kept as a route (not a bottom sheet) so it feels like a page.
   Future<void> _manageBackends() async {
     final backends = await Prefs.backends();
-    final navCtx = _navKey.currentContext;
+    final navCtx = rootNavKey.currentContext;
     if (navCtx == null || !navCtx.mounted) return;
-    await showModalBottomSheet<void>(
-      context: navCtx,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Text(ctx.l10n.backendsTitle,
-                  style: textOf(ctx)
-                      .meta
-                      .copyWith(fontWeight: FontWeight.w600)),
-            ),
-            Flexible(
-              child: backends.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(AppSpacing.md),
-                      child: Text(ctx.l10n.noSavedBackends,
-                          style: TextStyle(
-                              color: colorsOf(ctx).mutedForeground)),
-                    )
-                  : ListView(
-                      shrinkWrap: true,
-                      children: [
-                        for (final b in backends)
-                          ListTile(
-                            leading: Icon(
-                              _baseUrl == b.baseUrl
-                                  ? Icons.radio_button_checked
-                                  : Icons.dns_outlined,
-                              color: _baseUrl == b.baseUrl
-                                  ? colorsOf(ctx).primary
-                                  : colorsOf(ctx).mutedForeground,
-                            ),
-                            title: Text(b.name.isNotEmpty ? b.name : b.baseUrl),
-                            subtitle: Text(b.baseUrl,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: textOf(ctx)
-                                    .micro
-                                    .copyWith(
-                                        color: colorsOf(ctx).mutedForeground)),
-                            trailing: IconButton(
-                              icon: Icon(Icons.delete_outline_rounded,
-                                  size: 18,
-                                  color: colorsOf(ctx).mutedForeground),
-                              tooltip: ctx.l10n.deleteBackend,
-                              onPressed: () async {
-                                await Prefs.removeBackend(b.baseUrl);
-                                if (ctx.mounted) Navigator.pop(ctx);
-                                _manageBackends();
-                              },
-                            ),
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              _switchBackend(b);
-                            },
-                          ),
-                      ],
-                    ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.add_rounded),
-              title: Text(ctx.l10n.addBackend),
-              onTap: () {
-                Navigator.pop(ctx);
-                _logout();
-              },
-            ),
-          ],
+    await Navigator.of(navCtx).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _BackendsPage(
+          backends: backends,
+          activeBase: _baseUrl,
+          onSwitch: (b) {
+            _switchBackend(b);
+          },
+          onLogout: () {
+            _logout();
+          },
         ),
       ),
     );
@@ -169,25 +133,24 @@ class _EasyLabAppState extends State<EasyLabApp> {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<Locale>(
-      valueListenable: I18n.notifier,
-      builder: (context, locale, _) => MaterialApp(
-        navigatorKey: _navKey,
-        title: I18n.now.appTitle,
-        debugShowCheckedModeBanner: false,
-        theme: buildAppTheme(Brightness.light),
-        darkTheme: buildAppTheme(Brightness.dark),
-        themeMode: _dark ? ThemeMode.dark : ThemeMode.light,
-        locale: locale,
-        supportedLocales: const [Locale('zh'), Locale('en')],
-        localizationsDelegates: const [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        home: _buildHome(),
-      ),
-    );
+        valueListenable: I18n.notifier,
+        builder: (context, locale, _) => MaterialApp(
+          navigatorKey: rootNavKey,
+          title: I18n.now.appTitle,
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(Brightness.light),
+          darkTheme: buildAppTheme(Brightness.dark),
+          themeMode: _dark ? ThemeMode.dark : ThemeMode.light,
+          locale: locale,
+          supportedLocales: const [Locale('zh'), Locale('en')],
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          home: _buildHome(),
+        ));
   }
 
   Widget _buildHome() {
@@ -214,7 +177,8 @@ class _EasyLabAppState extends State<EasyLabApp> {
           store: _store!,
           darkMode: _dark,
           onDarkMode: _setDarkMode,
-          onSwitchBackend: _manageBackends);
+          onSwitchBackend: _manageBackends,
+          onBackendSwitched: _switchBackend);
     }
     return FutureBuilder<AppStore>(
       future: _buildStore(),
@@ -227,14 +191,23 @@ class _EasyLabAppState extends State<EasyLabApp> {
             store: snap.data!,
             darkMode: _dark,
             onDarkMode: _setDarkMode,
-            onSwitchBackend: _manageBackends);
+            onSwitchBackend: _manageBackends,
+            onBackendSwitched: _switchBackend);
       },
     );
   }
 
   Future<AppStore> _buildStore() async {
     final api = await EasyLabApi.create(baseUrl: _baseUrl!, token: _token!);
-    if (mounted) _store = AppStore(api);
+    // Open the local mirror (Drift) and hydrate drafts + read watermarks from
+    // it before the first chat render, so startup is instant and offline-safe.
+    LocalStore? local;
+    try {
+      local = await LocalStore.open();
+    } catch (_) {
+      local = null;
+    }
+    if (mounted) _store = AppStore(api, local: local);
     return _store!;
   }
 }
@@ -246,16 +219,18 @@ class _Shell extends StatelessWidget {
   final bool darkMode;
   final ValueChanged<bool> onDarkMode;
   final VoidCallback? onSwitchBackend;
+  final void Function(BackendCfg)? onBackendSwitched;
   const _Shell({
       required this.store,
       required this.darkMode,
       required this.onDarkMode,
-      this.onSwitchBackend});
+      this.onSwitchBackend,
+      this.onBackendSwitched});
 
   static const _navItems = <(SiderTab, IconData, String)>[
     (SiderTab.chat, Icons.chat_bubble_outline, 'tabChat'),
-    (SiderTab.code, Icons.folder_copy_outlined, 'tabCode'),
-    (SiderTab.containers, Icons.inventory_2_outlined, 'tabContainers'),
+    (SiderTab.code, Icons.account_tree_outlined, 'tabCode'),
+    (SiderTab.containers, Icons.widgets_outlined, 'tabContainers'),
     (SiderTab.config, Icons.settings_outlined, 'tabConfig'),
   ];
 
@@ -303,7 +278,8 @@ class _Shell extends StatelessWidget {
         lastCount: 1,
         darkMode: darkMode,
         onDarkMode: onDarkMode,
-        onSwitchBackend: onSwitchBackend);
+        onSwitchBackend: onSwitchBackend,
+        onBackendSwitched: onBackendSwitched);
     return PopScope(
       canPop: !store.canPopPage,
       onPopInvokedWithResult: (didPop, _) {
@@ -314,15 +290,19 @@ class _Shell extends StatelessWidget {
     );
   }
 
-  /// Tablet: the last two pages of the stack, side by side, 50/50.
+  /// Tablet: the last two pages of the stack, side by side. Always rendered
+  /// inside the same Row/Expanded structure — even for a single page — so the
+  /// element tree position of the left panel stays identical when a drill-in is
+  /// pushed. Otherwise Flutter disposes + recreates the panel (re-running its
+  /// initState → a visible reload/flicker on the settings list, unlike chat).
   Widget _tabletBody(SiderTab tab) {
     final stack = store.currentStack;
     final pages = buildStackPages(store, stack,
         lastCount: 2,
         darkMode: darkMode,
         onDarkMode: onDarkMode,
-        onSwitchBackend: onSwitchBackend);
-    if (pages.length == 1) return pages.first;
+        onSwitchBackend: onSwitchBackend,
+        onBackendSwitched: onBackendSwitched);
     return Row(
       children: [
         for (final p in pages) Expanded(child: p),
@@ -364,15 +344,13 @@ class _SetupScreenState extends State<_SetupScreen> {
     final token = _token.text.trim();
     if (base.isEmpty || token.isEmpty) return;
     setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final api = await EasyLabApi.create(baseUrl: base, token: token);
       await api.listSessions();
       if (!mounted) return;
       await widget.onSave(base, token);
     } catch (e) {
-      messenger.showSnackBar(
-          SnackBar(content: Text(I18n.now.loadError('$e'))));
+      showErrorToast(context, I18n.now.loadError('$e'));
     }
     if (mounted) setState(() => _busy = false);
   }
@@ -431,6 +409,100 @@ class _SetupScreenState extends State<_SetupScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Dedicated page for managing saved backends (switch / delete / add). Unlike
+/// a bottom sheet, it's a full route so it reads as its own screen.
+class _BackendsPage extends StatefulWidget {
+  final List<BackendCfg> backends;
+  final String? activeBase;
+  final void Function(BackendCfg) onSwitch;
+  final VoidCallback onLogout;
+  const _BackendsPage({
+    required this.backends,
+    required this.activeBase,
+    required this.onSwitch,
+    required this.onLogout,
+  });
+
+  @override
+  State<_BackendsPage> createState() => _BackendsPageState();
+}
+
+class _BackendsPageState extends State<_BackendsPage> {
+  late List<BackendCfg> _backends;
+
+  @override
+  void initState() {
+    super.initState();
+    _backends = [...widget.backends];
+  }
+
+  Future<void> _delete(BackendCfg b) async {
+    await Prefs.removeBackend(b.baseUrl);
+    if (!mounted) return;
+    setState(() => _backends.removeWhere((e) => e.baseUrl == b.baseUrl));
+    showToast(context, context.l10n.saved);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = colorsOf(context);
+    final text = textOf(context);
+    return Scaffold(
+      appBar: AppBar(title: Text(context.l10n.backendsTitle)),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        children: [
+          if (_backends.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Text(context.l10n.noSavedBackends,
+                  style: TextStyle(color: colors.mutedForeground)),
+            ),
+          for (final b in _backends)
+            Card(
+              margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: ListTile(
+                leading: Icon(
+                  widget.activeBase == b.baseUrl
+                      ? Icons.radio_button_checked
+                      : Icons.dns_outlined,
+                  color: widget.activeBase == b.baseUrl
+                      ? colors.primary
+                      : colors.mutedForeground,
+                ),
+                title: Text(b.name.isNotEmpty ? b.name : b.baseUrl),
+                subtitle: Text(b.baseUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        text.micro.copyWith(color: colors.mutedForeground)),
+                trailing: IconButton(
+                  icon: Icon(Icons.delete_outline_rounded,
+                      size: 18, color: colors.mutedForeground),
+                  tooltip: context.l10n.deleteBackend,
+                  onPressed: () => _delete(b),
+                ),
+                onTap: () {
+                  widget.onSwitch(b);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.add_rounded),
+            title: Text(context.l10n.addBackend),
+            onTap: () {
+              Navigator.pop(context);
+              widget.onLogout();
+            },
+          ),
+        ],
       ),
     );
   }

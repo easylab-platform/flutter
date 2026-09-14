@@ -5,251 +5,29 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../api.dart';
 import '../i18n.dart';
 import '../models.dart';
-import '../services/download_service.dart';
 import '../theme/app_theme.dart';
+import 'dialogs.dart';
+import 'media_attachment.dart';
 import 'tool_part.dart';
 
-/// A structured attachment (own `file` part from `/messages` or the send
-/// flow). Images render an inline thumbnail (tap to view full) fetched with
-/// the auth header; other files render a card that saves to Downloads.
+/// A structured attachment (own `file` part from `/messages` or the send flow).
+/// Rendered as a full-size media card by type (image thumbnail / inline audio
+/// player with duration / video poster / pdf/text preview / download) via
+/// [MediaCard]. History keeps the rich card; the composer uses a small tag.
 class _FileAttachment extends StatelessWidget {
   final ChatPart part;
   final EasyLabApi api;
   const _FileAttachment({required this.part, required this.api});
 
-  /// Historical attachments were often stored without name/mime/size (only
-  /// `code`). Fall back to a HEAD probe of the file to learn its content type,
-  /// so images render as thumbnails and files show a sensible name/size.
-  Future<({String? mime, int size, String name})> _resolved() async {
-    final code = part.code ?? '';
-    final probe = await api.fileHead(code);
-    return (
-      mime: part.mime?.isNotEmpty == true ? part.mime : probe.contentType,
-      size: (part.size ?? 0) != 0 ? part.size! : probe.length,
-      name: part.name?.isNotEmpty == true ? part.name! : code,
-    );
-  }
-
-  bool _isImageMime(String? mime) => (mime ?? '').startsWith('image/');
-
-  Future<void> _open(BuildContext context, String mime) async {
-    final code = part.code ?? '';
-    if (code.isEmpty) return;
-    try {
-      if (_isImageMime(mime)) {
-        final bytes = await api.fetchFileBytes(code);
-        if (!context.mounted) return;
-        // ignore: use_build_context_synchronously
-        showDialog<void>(
-          context: context,
-          builder: (_) => Dialog(
-            insetPadding: const EdgeInsets.all(16),
-            child: InteractiveViewer(
-              child: Image.memory(Uint8List.fromList(bytes)),
-            ),
-          ),
-        );
-      } else {
-        final where = await DownloadService(api).download(
-          path: api.filePath(code),
-          displayName: part.name ?? code,
-          mimeType: mime ?? 'application/octet-stream',
-        );
-        if (!context.mounted) return;
-        // ignore: use_build_context_synchronously
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.l10n.savedToDownloads(where)),
-          duration: const Duration(seconds: 2),
-        ));
-      }
-    } catch (e) {
-      if (!context.mounted) return;
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.l10n.sendFailed('$e')),
-          duration: const Duration(seconds: 2)));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final colors = colorsOf(context);
-    final text = textOf(context);
-    return FutureBuilder<({String? mime, int size, String name})>(
-      future: _resolved(),
-      builder: (context, snap) {
-        final data = snap.data;
-        final name = data?.name ?? part.code ?? '';
-        final mime = data?.mime;
-        final size = data?.size ?? 0;
-        final sizeLabel = size > 0 ? _formatBytes(size) : '';
-        if (_isImageMime(mime)) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-            child: GestureDetector(
-              onTap: () => _open(context, mime ?? ''),
-              child: ClipRRect(
-                borderRadius: AppRadius.rMd,
-                child: SizedBox(
-                  width: 220,
-                  height: 140,
-                  child: _ImageToolImage(code: part.code!, api: api),
-                ),
-              ),
-            ),
-          );
-        }
-        return Container(
-          margin: const EdgeInsets.only(bottom: 4),
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs + 2),
-          decoration: BoxDecoration(
-            color: colors.muted.withValues(alpha: 0.5),
-            borderRadius: AppRadius.rSm,
-            border: Border.all(color: colors.border.withValues(alpha: 0.6)),
-          ),
-          child: InkWell(
-            borderRadius: AppRadius.rSm,
-            onTap: () => _open(context, mime ?? ''),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.attach_file_rounded,
-                    size: 14, color: colors.mutedForeground),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(name,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.micro.copyWith(color: colors.foreground)),
-                ),
-                if (sizeLabel.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text(sizeLabel,
-                      style: text.micro.copyWith(color: colors.mutedForeground)),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
+    return MediaCard(
+      api: api,
+      code: part.code ?? '',
+      name: part.name,
+      mime: part.mime,
+      size: part.size,
     );
-  }
-}
-
-/// An image fetch with the auth header, showing a placeholder while loading.
-class _ImageToolImage extends StatelessWidget {  final String code;
-  final EasyLabApi api;
-  const _ImageToolImage({required this.code, required this.api});
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<int>>(
-      future: api.fetchFileBytes(code),
-      builder: (context, snap) {
-        if (snap.hasData) {
-          return Image.memory(Uint8List.fromList(snap.data!),
-              fit: BoxFit.cover);
-        }
-        if (snap.hasError) {
-          return const Center(child: Icon(Icons.broken_image_rounded, size: 28));
-        }
-        return const Center(child: CircularProgressIndicator());
-      },
-    );
-  }
-}
-
-/// Pretty-print a byte count (B/KB/MB/GB).
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  if (bytes < 1024 * 1024 * 1024) {
-    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
-  }
-  return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(1)} GB';
-}
-
-/// A file chip surfaced from a text part that carries the
-/// `[附件 <name> | file:<code> | <mime> | <size>]` reference we embed in the
-/// prompt. Clicking it opens an inline image preview (by [code]) or triggers
-/// a public-Downloads save for non-image files.
-class _FileChip extends StatelessWidget {
-  final String code;
-  final String label;
-  final String? mime;
-  final EasyLabApi api;
-  const _FileChip({required this.code, required this.label, this.mime, required this.api});
-
-  bool get _isImage => (mime ?? '').startsWith('image/');
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = colorsOf(context);
-    final text = textOf(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs + 2),
-      decoration: BoxDecoration(
-        color: colors.muted.withValues(alpha: 0.5),
-        borderRadius: AppRadius.rSm,
-        border: Border.all(color: colors.border.withValues(alpha: 0.6)),
-      ),
-      child: InkWell(
-        borderRadius: AppRadius.rSm,
-        onTap: () => _open(context),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(_isImage ? Icons.image_rounded : Icons.attach_file_rounded,
-                size: 14, color: colors.mutedForeground),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(label,
-                  overflow: TextOverflow.ellipsis,
-                  style: text.micro.copyWith(color: colors.foreground)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _open(BuildContext context) async {
-    try {
-      if (_isImage) {
-        final bytes = await api.fetchFileBytes(code);
-        if (!context.mounted) return;
-        // ignore: use_build_context_synchronously
-        showDialog<void>(
-          context: context,
-          builder: (_) => Dialog(
-            insetPadding: const EdgeInsets.all(16),
-            child: InteractiveViewer(
-              child: Image.memory(Uint8List.fromList(bytes)),
-            ),
-          ),
-        );
-      } else {
-        // Non-image files save into the public Downloads collection (and
-        // show a hop-free snackbar naming the destination).
-        final where = await DownloadService(api).download(
-          path: api.filePath(code),
-          displayName: label,
-          mimeType: mime ?? 'application/octet-stream',
-        );
-        if (!context.mounted) return;
-        // ignore: use_build_context_synchronously
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.l10n.savedToDownloads(where)),
-          duration: const Duration(seconds: 2),
-        ));
-      }
-    } catch (e) {
-      if (!context.mounted) return;
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.l10n.sendFailed('$e')),
-          duration: const Duration(seconds: 2)));
-    }
   }
 }
 
@@ -270,7 +48,13 @@ class _FileRefsText extends StatelessWidget {
       children: [
         for (final p in parts)
           p is _FileRef
-              ? _FileChip(code: p.code, label: p.label, mime: p.mime, api: api)
+              ? MediaCard(
+                  api: api,
+                  code: p.code,
+                  name: p.label,
+                  mime: p.mime,
+                  compact: true,
+                )
               : _Markdown(p as String),
       ],
     );
@@ -347,6 +131,10 @@ class MessageBubble extends StatelessWidget {
   final ChatMessage msg;
   final Future<void> Function(String messageId) onUndo;
   final void Function(String changeId)? onOpenChange;
+  /// Re-send this user message as-is (withdraw + resend). Null disables retry.
+  final void Function(String text)? onResend;
+  /// Withdraw + resend this user message with EDITED text. Null disables edit.
+  final void Function(String text)? onEditText;
   final EasyLabApi api;
   final String org;
   final String repo;
@@ -357,6 +145,8 @@ class MessageBubble extends StatelessWidget {
     required this.onUndo,
     required this.api,
     this.onOpenChange,
+    this.onResend,
+    this.onEditText,
     this.org = '',
     this.repo = '',
     this.branch = '',
@@ -373,8 +163,7 @@ class MessageBubble extends StatelessWidget {
         .map((p) => p.text)
         .join('\n');
     Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(context.l10n.copied), duration: const Duration(seconds: 1)));
+    showToast(context, context.l10n.copied);
   }
 
   Future<void> _actions(BuildContext context) async {
@@ -393,6 +182,19 @@ class MessageBubble extends StatelessWidget {
                 title: Text(ctx.l10n.copy),
                 onTap: () => Navigator.pop(ctx, 'copy'),
               ),
+            // Retry / edit only apply to the user's own messages.
+            if (msg.role == 'user' && onResend != null)
+              ListTile(
+                leading: const Icon(Icons.refresh_rounded),
+                title: Text(ctx.l10n.retry),
+                onTap: () => Navigator.pop(ctx, 'retry'),
+              ),
+            if (msg.role == 'user' && onEditText != null)
+              ListTile(
+                leading: const Icon(Icons.edit_rounded),
+                title: Text(ctx.l10n.edit),
+                onTap: () => Navigator.pop(ctx, 'edit'),
+              ),
             ListTile(
               leading: const Icon(Icons.undo_rounded),
               title: Text(ctx.l10n.undo),
@@ -406,9 +208,50 @@ class MessageBubble extends StatelessWidget {
     switch (action) {
       case 'copy':
         _copy(context);
+      case 'retry':
+        onResend?.call(_textOfMessage());
+      case 'edit':
+        final edited = await _editText(context);
+        if (edited != null) onEditText?.call(edited);
       case 'undo':
         onUndo(msg.id);
     }
+  }
+
+  /// Concatenated text of this message (used as the retry prompt / edit seed).
+  String _textOfMessage() => msg.parts
+      .where((p) => p.type == 'text')
+      .map((p) => p.text)
+      .join('\n');
+
+  /// Edit dialog: pre-fills the message text and returns the new text on save.
+  Future<String?> _editText(BuildContext context) async {
+    final ctrl = TextEditingController(text: _textOfMessage());
+    final edited = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.l10n.editMessage),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          minLines: 1,
+          maxLines: 8,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(ctx.l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text(ctx.l10n.apply),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return (edited == null || edited.isEmpty) ? null : edited;
   }
 
   @override
@@ -420,8 +263,17 @@ class MessageBubble extends StatelessWidget {
     final isSystem = msg.role == 'system' || msg.role == 'event';
     final isStreaming = msg.status == 'streaming';
 
+    // Reasoning (thinking) always renders ABOVE the rest of the message: the
+    // parts array is populated in event-arrival order, and the model may emit
+    // text before a subsequent reasoning block, which would otherwise place
+    // the answer above its own thinking. Stable partition keeps each group's
+    // relative order.
+    final ordered = <ChatPart>[
+      ...msg.parts.where((p) => p.type == 'reasoning'),
+      ...msg.parts.where((p) => p.type != 'reasoning'),
+    ];
     final parts = <Widget>[];
-    for (final part in msg.parts) {
+    for (final part in ordered) {
       if (part.type == 'text') {
         parts.add(_FileRefsText(text: part.text, api: _api));
       } else if (part.type == 'file') {
@@ -433,10 +285,6 @@ class MessageBubble extends StatelessWidget {
           part: part,
           isStreaming: isStreaming,
           api: _api,
-          org: org,
-          repo: repo,
-          branch: branch,
-          onOpenChange: onOpenChange,
         ));
       } else if (part.type == 'compaction') {
         parts.add(_CompactionBlock(text: part.text));
@@ -450,9 +298,30 @@ class MessageBubble extends StatelessWidget {
                 color: colors.destructive, fontWeight: FontWeight.w600)),
       );
     }
-    // No bubble yet: while the assistant is streaming but nothing has arrived
-    // (no text/tool part), render nothing instead of an empty "air bubble".
-    if (isStreaming && parts.isEmpty) return const SizedBox.shrink();
+    // While the assistant is streaming but NOTHING has arrived yet, show a
+    // "thinking…" indicator (it disappears the instant the first part —
+    // reasoning, text or a tool call — lands, which is rendered normally).
+    if (isStreaming && parts.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.sm + 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colors.mutedForeground,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(context.l10n.thinking,
+                style: text.micro.copyWith(color: colors.mutedForeground)),
+          ],
+        ),
+      );
+    }
 
     Widget bubble = Container(
       padding: const EdgeInsets.symmetric(
@@ -509,8 +378,15 @@ class MessageBubble extends StatelessWidget {
             _BubbleActions(
               isUser: isUser,
               showCopy: _hasText,
+              showResend: isUser && onResend != null,
+              showEdit: isUser && onEditText != null,
               createdAt: msg.createdAt,
               onCopy: () => _copy(context),
+              onResend: () => onResend?.call(_textOfMessage()),
+              onEdit: () async {
+                final edited = await _editText(context);
+                if (edited != null) onEditText?.call(edited);
+              },
               onUndo: () => _undo(context),
             ),
         ],
@@ -548,14 +424,22 @@ class MessageBubble extends StatelessWidget {
 class _BubbleActions extends StatelessWidget {
   final bool isUser;
   final bool showCopy;
+  final bool showResend;
+  final bool showEdit;
   final String createdAt;
   final VoidCallback onCopy;
+  final VoidCallback onResend;
+  final VoidCallback onEdit;
   final VoidCallback onUndo;
   const _BubbleActions({
     required this.isUser,
     required this.showCopy,
+    required this.showResend,
+    required this.showEdit,
     required this.createdAt,
     required this.onCopy,
+    required this.onResend,
+    required this.onEdit,
     required this.onUndo,
   });
 
@@ -573,13 +457,21 @@ class _BubbleActions extends StatelessWidget {
             _tinyIcon(Icons.copy_rounded, context.l10n.copy, onCopy, colors),
             const SizedBox(width: 2),
           ],
-          _tinyIcon(Icons.undo_rounded, context.l10n.undo, onUndo, colors),
-          if (isUser) ...[
-            const SizedBox(width: 4),
-            // Show the message's persisted timestamp instead of "you".
-            Text(_fmtTime(context, createdAt),
-                style: text.micro.copyWith(color: colors.mutedForeground)),
+          if (showResend) ...[
+            _tinyIcon(
+                Icons.refresh_rounded, context.l10n.retry, onResend, colors),
+            const SizedBox(width: 2),
           ],
+          if (showEdit) ...[
+            _tinyIcon(Icons.edit_rounded, context.l10n.edit, onEdit, colors),
+            const SizedBox(width: 2),
+          ],
+          _tinyIcon(Icons.undo_rounded, context.l10n.undo, onUndo, colors),
+          const SizedBox(width: 4),
+          // Every message shows its persisted timestamp (user AND assistant),
+          // so the conversation timeline is readable in both directions.
+          Text(_fmtTime(context, createdAt),
+              style: text.micro.copyWith(color: colors.mutedForeground)),
         ],
       ),
     );
@@ -630,7 +522,9 @@ class _ReasoningBlock extends StatelessWidget {
     return _CollapseBlock(
       label: context.l10n.thinkLabel + (streaming ? '...' : ''),
       labelColor: colors.warning,
-      initiallyOpen: true,
+      // Expanded while streaming; collapsed by default once the turn is done
+      // (the user can still expand it manually).
+      initiallyOpen: streaming,
       textStyle: text_.micro
           .copyWith(color: colors.warning, fontWeight: FontWeight.w600),
       wrapper: (child) => Container(
@@ -707,6 +601,16 @@ class _CollapseBlock extends StatefulWidget {
 
 class _CollapseBlockState extends State<_CollapseBlock> {
   late bool _open = widget.initiallyOpen;
+
+  @override
+  void didUpdateWidget(_CollapseBlock old) {
+    super.didUpdateWidget(old);
+    // Follow a streaming→done transition (expand while streaming, auto-collapse
+    // when complete) unless the user has already toggled it in this instance.
+    if (old.initiallyOpen != widget.initiallyOpen) {
+      _open = widget.initiallyOpen;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

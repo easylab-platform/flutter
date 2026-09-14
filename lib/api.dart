@@ -15,14 +15,39 @@ import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart' as wkt
 import 'models.dart';
 import 'net/http_client_factory.dart';
 
+bool isAuthError(Object e) =>
+    e is connect.ConnectException &&
+    (e.code == connect.Code.unauthenticated ||
+        e.code == connect.Code.permissionDenied);
+
+/// Parsed watch/prompt stream event.
 class StreamEvent {
   final String event;
   final Map<String, dynamic> params;
-  StreamEvent(this.event, Map<String, dynamic>? params)
+
+  /// Per-event id from the server (dedup key across replay/live overlap).
+  final String eid;
+
+  /// Turn id this event belongs to (stamped by the server), if present.
+  final String runId;
+
+  StreamEvent(this.event, Map<String, dynamic>? params, {this.eid = '', this.runId = ''})
       : params = params ?? const {};
   dynamic get(String key) => params[key];
   String str(String key) => params[key] as String? ?? '';
 }
+
+class SessionListEvent {
+  final bool snapshot;
+  final List<Session> upserts;
+  final List<String> removed;
+  SessionListEvent({
+    this.snapshot = false,
+    this.upserts = const [],
+    this.removed = const [],
+  });
+}
+
 
 class TaskLogLine {
   final String stream;
@@ -293,12 +318,20 @@ class EasyLabApi {
 
   // ---- stream (SSE) ----
 
-  Stream<StreamEvent> streamEvents(String sessionId) {
-    final sdkStream =
-        _agent.watchSession(sdk.WatchSessionRequest(id: sessionId));
-    return sdkStream.map((e) => StreamEvent(
+  Stream<StreamEvent> streamEvents(String sessionId, {String since = ''}) {
+    final sdkStream = _agent.watchSession(
+      sdk.WatchSessionRequest(id: sessionId, since: since),
+    );
+    return sdkStream.map((e) {
+      final params = StructUtils.toJson(e.params);
+      final runId = params['run_id'];
+      return StreamEvent(
         e.event,
-        StructUtils.toJson(e.params)));
+        params,
+        eid: e.eid,
+        runId: runId is String ? runId : '',
+      );
+    });
   }
 
   /// Streams a task's log (agent.v1/ops TaskLog over Connect).
@@ -576,35 +609,79 @@ class EasyLabApi {
   Future<void> deleteProvider(String pid) =>
       _agent.deleteProvider(sdk.DeleteProviderRequest(providerId: pid));
 
+  Future<({List<ProviderModel> models, String error})> discoverGatewayModels({
+    required String providerId,
+    required String apiType,
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final r = await _agent.discoverGatewayModels(
+      sdk.DiscoverGatewayModelsRequest(
+        providerId: providerId,
+        apiType: apiType,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+      ),
+    );
+    return (
+      models: r.models
+          .map((m) => ProviderModel(
+                id: m.id,
+                name: m.name,
+                contextLimit: m.contextLimit.toInt(),
+                modelType: m.modelType,
+              ))
+          .toList(),
+      error: r.error,
+    );
+  }
+
   Future<Map<String, dynamic>> testProvider(
-          {required String apiType,
-          required String baseUrl,
-          required String apiKey,
-          String? model}) async {
+      {required String apiType,
+      required String baseUrl,
+      required String apiKey,
+      String providerId = '',
+      String? model,
+      String capability = 'text'}) async {
     final r = await _agent.testProvider(sdk.TestProviderRequest(
-      providerId: '',
+      providerId: providerId,
       apiType: apiType,
       baseUrl: baseUrl,
       apiKey: apiKey,
       model: model ?? '',
+      capability: capability,
     ));
     return {'ok': r.ok, 'result': r.result};
   }
 
-  Future<List<ModelInfo>> models() async {
-    final r = await _agent.listModels(sdk.ListModelsRequest());
-    return r.models.map((m) => ModelInfo(id: m.id, name: m.name)).toList();
+  Future<List<ModelInfo>> models({required String providerId}) async {
+    if (providerId.isEmpty) return const [];
+    final r = await _agent
+        .listModels(sdk.ListModelsRequest(providerId: providerId));
+    return r.models
+        .map((m) => ModelInfo(
+              id: m.id,
+              name: m.name,
+              providerId: providerId,
+              contextLimit: m.contextLimit.toInt(),
+              variants: m.variants
+                  .map((v) => ModelVariantInfo(
+                      id: v.id, name: v.name, description: v.description))
+                  .toList(),
+            ))
+        .toList();
   }
 
-  Future<List<Preset>> presets() async {
-    final r = await _agent.listPresets(sdk.ListPresetsRequest());
+  Future<List<Preset>> presets({String? locale}) async {
+    final r = await _agent
+        .listPresets(sdk.ListPresetsRequest(locale: locale ?? ''));
     return r.presets.map((p) => Preset(
-      id: p.id,
-      systemPrompt: p.systemPrompt,
-      tools: p.tools,
-      maxTurns: p.maxTurns,
-      isSystem: p.isSystem,
-    )).toList();
+          id: p.id,
+          systemPrompt: p.systemPrompt,
+          tools: p.tools,
+          maxTurns: p.maxTurns,
+          isSystem: p.isSystem,
+        )).toList();
   }
 
   Future<void> savePreset(Preset p) => _agent.upsertPreset(sdk.UpsertPresetRequest(
@@ -893,6 +970,34 @@ class EasyLabApi {
     return r.tokens
         .map((t) => UserTokenInfo(id: t.id, createdAt: t.createdAt))
         .toList();
+  }
+
+  Stream<SessionListEvent> watchSessions() {
+    final sdkStream = _agent.watchSessions(sdk.WatchSessionsRequest());
+    return sdkStream.map((e) => SessionListEvent(
+          snapshot: e.snapshot,
+          upserts: e.upserts.map(sessionFromPb).toList(),
+          removed: e.removed,
+        ));
+  }
+
+  Future<String> config(String key) async {
+    final r = await _agent.getConfig(sdk.GetConfigRequest(key: key));
+    return r.value;
+  }
+
+  Future<({List<Message> messages, bool resync, String tipId})> messagesAfter(
+    String id,
+    String after, {
+    int limit = 200,
+  }) async {
+    final r = await _agent.listMessages(sdk.ListMessagesRequest(
+        id: id, limit: limit, after: after));
+    return (
+      messages: r.messages.map(messageFromPb).toList(),
+      resync: r.resync,
+      tipId: r.tipId,
+    );
   }
 }
 

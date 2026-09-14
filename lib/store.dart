@@ -1,15 +1,57 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 
 import 'api.dart';
 import 'enums.dart';
 import 'models.dart';
 import 'navigation.dart';
+import 'prefs.dart';
+import 'services/local_store.dart';
 
 /// Mirrors stores.svelte.ts: app-wide state + repository/file-outlook caching.
 class AppStore extends ChangeNotifier {
-  AppStore(this.api);
+  AppStore(this.api, {this.local}) {
+    _hydrateLocal();
+    startSessionWatch();
+  }
 
   final EasyLabApi api;
+
+  /// Persistent local mirror (Drift). Null when the platform/DB failed to open.
+  final LocalStore? local;
+
+  Future<void> _hydrateLocal() async {
+    final l = local;
+    if (l == null) return;
+    try {
+      readSeqs = await l.loadReadSeqs();
+      chatDrafts
+        ..clear()
+        ..addAll(await l.loadDrafts());
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// Per-session unsent drafts (text + attachments).
+  final Map<String, ChatDraft> chatDrafts = {};
+
+  ChatDraft draftFor(String sessionId) =>
+      chatDrafts.putIfAbsent(sessionId, ChatDraft.new);
+
+  /// session id -> last-read message_seq (client-local unread state).
+  Map<String, int> readSeqs = {};
+
+  StreamSubscription<SessionListEvent>? _sessionSub;
+  Timer? _sessionReconnect;
+  int _sessionRetry = 0;
+  int _sessionAttempt = 0;
+  static const int _maxSessionAttempts = 6;
+  bool _firstSnapshot = true;
+
+  int providersRevision = 0;
+  ProviderDraft? providerDraft;
 
   SiderTab siderTab = SiderTab.chat;
   List<Session> sessions = [];
@@ -62,17 +104,7 @@ class AppStore extends ChangeNotifier {
     return null;
   }
 
-  Future<void> refreshSessions() async {
-    try {
-      sessions = await api.listSessions();
-      sessionError = '';
-    } catch (e) {
-      // Keep the stale list but surface the failure so the UI can show a
-      // banner instead of a misleading "empty" state.
-      sessionError = '$e';
-    }
-    notifyListeners();
-  }
+
 
   Future<void> refreshRepos() async {
     try {
@@ -396,5 +428,164 @@ class AppStore extends ChangeNotifier {
   bool get canPopPage => currentStack.length > 1;
 
   /// Public wrapper so screens can trigger a rebuild after mutating lists.
+  void startSessionWatch() {
+    _sessionReconnect?.cancel();
+    _sessionReconnect = null;
+    _sessionSub?.cancel();
+    _sessionSub = api.watchSessions().listen(
+      _applySessionEvent,
+      onError: (_) => _onSessionStreamClosed(),
+      onDone: _onSessionStreamClosed,
+      cancelOnError: false,
+    );
+  }
+
+  void _onSessionStreamClosed() {
+    if (_sessionAttempt >= _maxSessionAttempts) return;
+    final delay = Duration(seconds: min(30, 1 << min(_sessionAttempt, 5)));
+    _sessionAttempt++;
+    _sessionReconnect?.cancel();
+    _sessionReconnect = Timer(delay, startSessionWatch);
+  }
+
+  void _applySessionEvent(SessionListEvent ev) {
+    _sessionAttempt = 0;
+    if (ev.snapshot) {
+      sessions = [...ev.upserts];
+      // First ever snapshot on this device: seed read watermarks so historical
+      // sessions don't all pop up as unread. Subsequent (new) sessions start
+      // unread at 0 so their messages count.
+      if (_firstSnapshot) {
+        _firstSnapshot = false;
+        for (final s in sessions) {
+          if (!readSeqs.containsKey(s.id)) {
+            readSeqs[s.id] = s.messageSeq;
+          }
+        }
+        Prefs.saveReadSeqs();
+      }
+    } else {
+      for (final s in ev.upserts) {
+        final i = sessions.indexWhere((x) => x.id == s.id);
+        if (i == -1) {
+          sessions = [...sessions, s];
+        } else {
+          sessions = [...sessions]..[i] = s;
+        }
+      }
+      if (ev.removed.isNotEmpty) {
+        sessions = sessions.where((s) => !ev.removed.contains(s.id)).toList();
+      }
+    }
+    // The session currently open is being read live: advance its watermark as
+    // new messages stream in so returning to the list shows no stale badge.
+    final active = activeSession;
+    if (active != null && (readSeqs[active.id] ?? -1) < active.messageSeq) {
+      readSeqs[active.id] = active.messageSeq;
+      Prefs.saveReadSeqs();
+    }
+    sessionError = '';
+    notifyListeners();
+  }
+
+  Future<void> refreshSessions() async {
+    try {
+      sessions = await api.listSessions();
+      sessionError = '';
+    } catch (e) {
+      // Keep the stale list but surface the failure so the UI can show a
+      // banner instead of a misleading "empty" state.
+      sessionError = '$e';
+    }
+    notifyListeners();
+  }
+
+  int unreadCountFor(Session s) {
+    final read = readSeqs[s.id];
+    if (read == null) return s.messageSeq;
+    final n = s.messageSeq - read;
+    return n > 0 ? n : 0;
+  }
+
+  bool isUnread(Session s) => unreadCountFor(s) > 0;
+
+  /// Provider draft shared by the provider-form and model-form config pages.
+  /// Null when not editing. Model mutations happen here so navigating between
+  /// the two form pages never loses the in-progress edit.
+
+  void saveDraftText(String sessionId, String text) {
+    final d = draftFor(sessionId);
+    if (d.text == text) return;
+    d.text = text;
+    if (text.isEmpty && d.attachments.isEmpty) {
+      chatDrafts.remove(sessionId);
+      local?.saveDraft(sessionId, '', const []);
+      return;
+    }
+    local?.saveDraft(sessionId, d.text, d.attachments);
+  }
+
+  void saveDraftAttachments(String sessionId, List<UploadedFile> attachments) {
+    final d = draftFor(sessionId);
+    d.attachments = List.of(attachments);
+    if (d.text.isEmpty && d.attachments.isEmpty) {
+      chatDrafts.remove(sessionId);
+      local?.saveDraft(sessionId, '', const []);
+      return;
+    }
+    local?.saveDraft(sessionId, d.text, d.attachments);
+  }
+
+  void clearDraft(String sessionId) {
+    chatDrafts.remove(sessionId);
+    local?.saveDraft(sessionId, '', const []);
+  }
+
+  void pushSibling(AppPage page) {
+    final list = currentStack;
+    if (list.length > 1) {
+      list.removeRange(1, list.length); // drop the previous drill-in
+    }
+    pushPage(page); // this re-appends (and dedups same-key)
+  }
+
+  Future<List<String>> deleteSessions(List<String> ids) async {
+    final failed = <String>[];
+    var closedActive = false;
+    for (final id in ids) {
+      try {
+        await api.deleteSession(id);
+        if (activeSessionId == id) {
+          activeSessionId = null;
+          closedActive = true;
+        }
+      } catch (_) {
+        failed.add(id);
+      }
+    }
+    // Reset the chat stack to the list so a deleted active session does not
+    // leave its conversation page open, then reload the (now shorter) list.
+    if (closedActive) closeSession();
+    await refreshSessions();
+    return failed;
+  }
+
+  void bumpProvidersRevision() {
+    providersRevision += 1;
+    notifyListeners();
+  }
+
+  void beginProviderDraft(ProviderInfo? existing) {
+    providerDraft = existing == null
+        ? ProviderDraft(apiType: 'openai-compatible')
+        : ProviderDraft.fromProvider(existing);
+    notifyListeners();
+  }
+
+  void endProviderDraft() {
+    providerDraft = null;
+    notifyListeners();
+  }
+
   void notifyObservers() => notifyListeners();
 }

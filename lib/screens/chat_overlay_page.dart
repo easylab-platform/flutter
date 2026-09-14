@@ -5,9 +5,8 @@ import '../navigation.dart';
 import '../store.dart';
 import '../theme/app_theme.dart';
 import 'chat_overlay_views.dart';
-/// A session sub-page (timeline / files / mailbox / container / todos), shown
-/// as its own page in the chat tab's stack. It carries a tab bar to switch
-/// between the sub-pages and a close button to pop back.
+/// A session sub-page (mailbox), shown as its own page in the chat tab's
+/// stack. It carries a close button to pop back.
 class ChatOverlayPageWidget extends StatefulWidget {
   final AppStore store;
   final SessionOverlay overlay;
@@ -39,12 +38,11 @@ class _ChatOverlayPageWidgetState extends State<ChatOverlayPageWidget> {
                   tooltip: context.l10n.back,
                   onPressed: () => store.popPage(),
                 ),
-                for (final t in SessionOverlay.values)
-                  _OverlayTab(
-                    label: _label(t),
-                    selected: overlay == t,
-                    onTap: () => store.pushPage(ChatOverlayPage(t)),
-                  ),
+                _OverlayTab(
+                  label: _label(overlay),
+                  selected: true,
+                  onTap: () {},
+                ),
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.close_rounded, size: 16),
@@ -60,16 +58,12 @@ class _ChatOverlayPageWidgetState extends State<ChatOverlayPageWidget> {
   }
 
   String _label(SessionOverlay ov) {
-    switch (ov) {
-      case SessionOverlay.timeline:
-        return context.l10n.timeline;
-      case SessionOverlay.files:
-        return context.l10n.files;
-      case SessionOverlay.mailbox:
-        return context.l10n.mailbox;
-      case SessionOverlay.container:
-        return context.l10n.container;
-    }
+    return switch (ov) {
+      SessionOverlay.mailbox => context.l10n.mailbox,
+      SessionOverlay.timeline => context.l10n.timeline,
+      SessionOverlay.files => context.l10n.files,
+      SessionOverlay.container => context.l10n.container,
+    };
   }
 
   Widget _buildBody() {

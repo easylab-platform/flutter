@@ -3,6 +3,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 // ---- enums / roles ----
 
@@ -25,7 +26,12 @@ class Session {
   final String org;
   final String repo;
   final String branch;
+
+  /// Canonical model reference "provider_id/model_id".
   final String model;
+
+  /// Selected reasoning variant id (empty = provider defaults).
+  final String variant;
   final String preset;
   final String? tipId;
   final int? maxTurns;
@@ -42,12 +48,17 @@ class Session {
   final String lastMessageAt;
   final String lastMessagePreview;
 
+  /// Monotonic per-session message counter (server-owned). The client derives
+  /// the unread count from `messageSeq - readSeq` (read state is local).
+  final int messageSeq;
+
   Session({
     required this.id,
     this.org = '',
     this.repo = '',
     this.branch = '',
     this.model = '',
+    this.variant = '',
     this.preset = '',
     this.tipId,
     this.maxTurns,
@@ -63,62 +74,69 @@ class Session {
     this.unreadCount,
     this.lastMessageAt = '',
     this.lastMessagePreview = '',
+    this.messageSeq = 0,
   });
 
   factory Session.fromJson(Map<String, dynamic> j) => Session(
-        id: j['id'] as String? ?? '',
-        org: j['org'] as String? ?? '',
-        repo: j['repo'] as String? ?? '',
-        branch: j['branch'] as String? ?? '',
-        model: j['model'] as String? ?? '',
-        preset: j['preset'] as String? ?? '',
-        locale: j['locale'] as String?,
-        tipId: j['tip_id'] as String?,
-        maxTurns: j['max_turns'] as int?,
-        systemPrompt: j['system_prompt'] as String?,
-        inputTokens: j['input_tokens'] as int?,
-        outputTokens: j['output_tokens'] as int?,
-        totalTokens: j['total_tokens'] as int?,
-        lastInputTokens: j['last_input_tokens'] as int?,
-        lastOutputTokens: j['last_output_tokens'] as int?,
-        createdAt: j['created_at'] as String? ?? '',
-        updatedAt: j['updated_at'] as String? ?? '',
-        unreadCount: j['unread_count'] as int?,
-        lastMessageAt: j['last_message_at'] as String? ?? '',
-        lastMessagePreview: j['last_message_preview'] as String? ?? '',
-      );
+    id: j['id'] as String? ?? '',
+    org: j['org'] as String? ?? '',
+    repo: j['repo'] as String? ?? '',
+    branch: j['branch'] as String? ?? '',
+    model: j['model'] as String? ?? '',
+    variant: j['variant'] as String? ?? '',
+    preset: j['preset'] as String? ?? '',
+    locale: j['locale'] as String?,
+    tipId: j['tip_id'] as String?,
+    maxTurns: j['max_turns'] as int?,
+    systemPrompt: j['system_prompt'] as String?,
+    inputTokens: j['input_tokens'] as int?,
+    outputTokens: j['output_tokens'] as int?,
+    totalTokens: j['total_tokens'] as int?,
+    lastInputTokens: j['last_input_tokens'] as int?,
+    lastOutputTokens: j['last_output_tokens'] as int?,
+    createdAt: j['created_at'] as String? ?? '',
+    updatedAt: j['updated_at'] as String? ?? '',
+    unreadCount: j['unread_count'] as int?,
+    lastMessageAt: j['last_message_at'] as String? ?? '',
+    lastMessagePreview: j['last_message_preview'] as String? ?? '',
+    messageSeq: j['message_seq'] as int? ?? 0,
+  );
 
-  String get sessionName =>
-      org.isNotEmpty ? '$org:$repo:$branch' : id;
+  String get sessionName => org.isNotEmpty ? '$org:$repo:$branch' : id;
 
   Session copyWith({
     String? model,
+    String? variant,
     String? preset,
     int? maxTurns,
     String? systemPrompt,
     int? unreadCount,
-  }) =>
-      Session(
-        id: id,
-        org: org,
-        repo: repo,
-        branch: branch,
-        model: model ?? this.model,
-        preset: preset ?? this.preset,
-        tipId: tipId,
-        maxTurns: maxTurns ?? this.maxTurns,
-        systemPrompt: systemPrompt ?? this.systemPrompt,
-        inputTokens: inputTokens,
-        outputTokens: outputTokens,
-        totalTokens: totalTokens,
-        lastInputTokens: lastInputTokens,
-        lastOutputTokens: lastOutputTokens,
-        createdAt: createdAt,
-        updatedAt: updatedAt,
-        unreadCount: unreadCount ?? this.unreadCount,
-        lastMessageAt: lastMessageAt,
-        lastMessagePreview: lastMessagePreview,
-      );
+    int? messageSeq,
+    String? lastMessageAt,
+    String? lastMessagePreview,
+  }) => Session(
+    id: id,
+    org: org,
+    repo: repo,
+    branch: branch,
+    model: model ?? this.model,
+    variant: variant ?? this.variant,
+    preset: preset ?? this.preset,
+    tipId: tipId,
+    maxTurns: maxTurns ?? this.maxTurns,
+    systemPrompt: systemPrompt ?? this.systemPrompt,
+    inputTokens: inputTokens,
+    outputTokens: outputTokens,
+    totalTokens: totalTokens,
+    lastInputTokens: lastInputTokens,
+    lastOutputTokens: lastOutputTokens,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+    unreadCount: unreadCount ?? this.unreadCount,
+    lastMessageAt: lastMessageAt ?? this.lastMessageAt,
+    lastMessagePreview: lastMessagePreview ?? this.lastMessagePreview,
+    messageSeq: messageSeq ?? this.messageSeq,
+  );
 }
 
 class SessionInfo {
@@ -141,14 +159,14 @@ class SessionInfo {
   });
 
   factory SessionInfo.fromJson(Map<String, dynamic> j) => SessionInfo(
-        sessionId: j['session_id'] as String? ?? '',
-        branch: j['branch'] as String? ?? '',
-        messageCount: j['message_count'] as int? ?? 0,
-        unread: j['unread'] as int?,
-        model: j['model'] as String? ?? '',
-        preset: j['preset'] as String? ?? '',
-        locale: j['locale'] as String?,
-      );
+    sessionId: j['session_id'] as String? ?? '',
+    branch: j['branch'] as String? ?? '',
+    messageCount: j['message_count'] as int? ?? 0,
+    unread: j['unread'] as int?,
+    model: j['model'] as String? ?? '',
+    preset: j['preset'] as String? ?? '',
+    locale: j['locale'] as String?,
+  );
 }
 
 // ---- repo tree ----
@@ -158,11 +176,11 @@ class BranchNode {
   final SessionInfo? session;
   BranchNode({required this.branch, this.session});
   factory BranchNode.fromJson(Map<String, dynamic> j) => BranchNode(
-        branch: j['branch'] as String? ?? '',
-        session: j['session'] == null
-            ? null
-            : SessionInfo.fromJson(j['session'] as Map<String, dynamic>),
-      );
+    branch: j['branch'] as String? ?? '',
+    session: j['session'] == null
+        ? null
+        : SessionInfo.fromJson(j['session'] as Map<String, dynamic>),
+  );
 }
 
 class RepoNode {
@@ -170,11 +188,11 @@ class RepoNode {
   final List<BranchNode> branches;
   RepoNode({required this.repo, required this.branches});
   factory RepoNode.fromJson(Map<String, dynamic> j) => RepoNode(
-        repo: j['repo'] as String? ?? '',
-        branches: (j['branches'] as List? ?? [])
-            .map((e) => BranchNode.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    repo: j['repo'] as String? ?? '',
+    branches: (j['branches'] as List? ?? [])
+        .map((e) => BranchNode.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
 class OrgNode {
@@ -182,11 +200,11 @@ class OrgNode {
   final List<RepoNode> repos;
   OrgNode({required this.org, required this.repos});
   factory OrgNode.fromJson(Map<String, dynamic> j) => OrgNode(
-        org: j['org'] as String? ?? '',
-        repos: (j['repos'] as List? ?? [])
-            .map((e) => RepoNode.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    org: j['org'] as String? ?? '',
+    repos: (j['repos'] as List? ?? [])
+        .map((e) => RepoNode.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
 // ---- message ----
@@ -197,6 +215,11 @@ class ToolState {
   final String? error;
   final Map<String, dynamic>? input;
   final String? output;
+
+  /// Structured result data (tool `data`), e.g. media tool fixed fields
+  /// (`images`/`videos`/`audio` file refs). Opaque to the UI except for the
+  /// known media keys rendered by [MediaCard].
+  final Map<String, dynamic>? data;
   final String? changeId;
   final String? diff;
   final int? additions;
@@ -208,6 +231,7 @@ class ToolState {
     this.error,
     this.input,
     this.output,
+    this.data,
     this.changeId,
     this.diff,
     this.additions,
@@ -220,46 +244,49 @@ class ToolState {
     String? error,
     Map<String, dynamic>? input,
     String? output,
+    Map<String, dynamic>? data,
     String? changeId,
     String? diff,
     int? additions,
     int? deletions,
-  }) =>
-      ToolState(
-        status: status ?? this.status,
-        title: title ?? this.title,
-        error: error ?? this.error,
-        input: input ?? this.input,
-        output: output ?? this.output,
-        changeId: changeId ?? this.changeId,
-        diff: diff ?? this.diff,
-        additions: additions ?? this.additions,
-        deletions: deletions ?? this.deletions,
-      );
+  }) => ToolState(
+    status: status ?? this.status,
+    title: title ?? this.title,
+    error: error ?? this.error,
+    input: input ?? this.input,
+    output: output ?? this.output,
+    data: data ?? this.data,
+    changeId: changeId ?? this.changeId,
+    diff: diff ?? this.diff,
+    additions: additions ?? this.additions,
+    deletions: deletions ?? this.deletions,
+  );
 
   factory ToolState.fromJson(Map<String, dynamic> j) => ToolState(
-        status: j['status'] as String?,
-        title: j['title'] as String?,
-        error: j['error'] as String?,
-        input: (j['input'] as Map?)?.cast<String, dynamic>(),
-        output: j['output'] as String?,
-        changeId: j['change_id'] as String?,
-        diff: j['diff'] as String?,
-        additions: j['additions'] as int?,
-        deletions: j['deletions'] as int?,
-      );
+    status: j['status'] as String?,
+    title: j['title'] as String?,
+    error: j['error'] as String?,
+    input: (j['input'] as Map?)?.cast<String, dynamic>(),
+    output: j['output'] as String?,
+    data: (j['data'] as Map?)?.cast<String, dynamic>(),
+    changeId: j['change_id'] as String?,
+    diff: j['diff'] as String?,
+    additions: j['additions'] as int?,
+    deletions: j['deletions'] as int?,
+  );
 
   Map<String, dynamic> toJson() => {
-        if (status != null) 'status': status,
-        if (title != null) 'title': title,
-        if (error != null) 'error': error,
-        if (input != null) 'input': input,
-        if (output != null) 'output': output,
-        if (changeId != null) 'change_id': changeId,
-        if (diff != null) 'diff': diff,
-        if (additions != null) 'additions': additions,
-        if (deletions != null) 'deletions': deletions,
-      };
+    if (status != null) 'status': status,
+    if (title != null) 'title': title,
+    if (error != null) 'error': error,
+    if (input != null) 'input': input,
+    if (output != null) 'output': output,
+    if (data != null) 'data': data,
+    if (changeId != null) 'change_id': changeId,
+    if (diff != null) 'diff': diff,
+    if (additions != null) 'additions': additions,
+    if (deletions != null) 'deletions': deletions,
+  };
 }
 
 class MessagePart {
@@ -291,26 +318,22 @@ class MessagePart {
   });
 
   factory MessagePart.fromJson(Map<String, dynamic> j) => MessagePart(
-        id: j['id'] as String? ?? '',
-        type: j['type'] as String? ?? '',
-        text: j['text'] as String?,
-        tool: j['tool'] as String?,
-        toolCallId: j['tool_call_id'] as String?,
-        state: j['state'] == null
-            ? null
-            : ToolState.fromJson(j['state'] as Map<String, dynamic>),
-        metadata: (j['metadata'] as Map?)?.cast<String, dynamic>(),
-        code: j['code'] as String?,
-        name: j['name'] as String?,
-        mime: j['mime'] as String?,
-        size: j['size'] as int?,
-      );
+    id: j['id'] as String? ?? '',
+    type: j['type'] as String? ?? '',
+    text: j['text'] as String?,
+    tool: j['tool'] as String?,
+    toolCallId: j['tool_call_id'] as String?,
+    state: j['state'] == null
+        ? null
+        : ToolState.fromJson(j['state'] as Map<String, dynamic>),
+    metadata: (j['metadata'] as Map?)?.cast<String, dynamic>(),
+    code: j['code'] as String?,
+    name: j['name'] as String?,
+    mime: j['mime'] as String?,
+    size: j['size'] as int?,
+  );
 
-  MessagePart copyWith({
-    String? text,
-    ToolState? state,
-    String? tool,
-  }) =>
+  MessagePart copyWith({String? text, ToolState? state, String? tool}) =>
       MessagePart(
         id: id,
         type: type,
@@ -332,34 +355,43 @@ class Message {
   final List<MessagePart> parts;
   final String? createdAt;
 
+  /// Server chain pin (`prev_id`) of this message, or empty at the root.
+  final String prevId;
+
   Message({
     required this.id,
     required this.role,
     required this.parts,
     this.createdAt,
+    this.prevId = '',
   });
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
-        id: j['id'] as String? ?? '',
-        role: j['role'] as String? ?? '',
-        parts: (j['parts'] as List? ?? [])
-            .map((e) => MessagePart.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        createdAt: j['created_at'] as String?,
-      );
+    id: j['id'] as String? ?? '',
+    role: j['role'] as String? ?? '',
+    prevId: j['prev_id'] as String? ?? '',
+    parts: (j['parts'] as List? ?? [])
+        .map((e) => MessagePart.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    createdAt: j['created_at'] as String?,
+  );
 }
 
 // ---- attachment upload / download ----
 
-/// A file the user picked to attach to a message, before upload.
+/// A file the user picked to attach to a message, before upload. [bytes] is
+/// always available (picked in-memory on web); [path] is set on native
+/// platforms when a filesystem path exists (used for local media preview).
 class UploadedFileSource {
   final String path;
   final String name;
   final String mimeType;
+  final Uint8List? bytes;
   UploadedFileSource({
-    required this.path,
+    this.path = '',
     required this.name,
     required this.mimeType,
+    this.bytes,
   });
 }
 
@@ -390,41 +422,56 @@ class UploadedFile {
   });
 
   UploadedFile uploading(String srcPath) => UploadedFile(
-      code: code,
-      name: name,
-      mime: mime,
-      size: size,
-      sha256: sha256,
-      deduped: deduped,
-      localPath: srcPath,
-      uploadState: 'uploading');
+    code: code,
+    name: name,
+    mime: mime,
+    size: size,
+    sha256: sha256,
+    deduped: deduped,
+    localPath: srcPath,
+    uploadState: 'uploading',
+  );
 
   UploadedFile uploadError(String msg) => UploadedFile(
-      code: code,
-      name: name,
-      mime: mime,
-      size: size,
-      sha256: sha256,
-      deduped: deduped,
-      localPath: localPath,
-      uploadState: 'error',
-      error: msg);
+    code: code,
+    name: name,
+    mime: mime,
+    size: size,
+    sha256: sha256,
+    deduped: deduped,
+    localPath: localPath,
+    uploadState: 'error',
+    error: msg,
+  );
 
   bool get isUploading => uploadState == 'uploading';
   bool get hasError => uploadState == 'error';
   bool get isLocal => code.isEmpty;
 
   factory UploadedFile.fromJson(Map<String, dynamic> j) => UploadedFile(
-        code: j['code'] as String? ?? '',
-        name: j['name'] as String?,
-        mime: j['mime'] as String?,
-        size: (j['size'] as num?)?.toInt(),
-        sha256: j['hash'] as String?,
-        deduped: j['deduped'] as bool? ?? false,
-      );
+    code: j['code'] as String? ?? '',
+    name: j['name'] as String?,
+    mime: j['mime'] as String?,
+    size: (j['size'] as num?)?.toInt(),
+    sha256: j['hash'] as String?,
+    deduped: j['deduped'] as bool? ?? false,
+  );
 
   /// The file code the client sends to the platform, which splices it into a
   /// `[附件 …file:<code>…]` reference. The client never renders the text.
+}
+
+/// The unsent composer state for one session: the typed text plus the pending
+/// attachments (uploaded, uploading, or errored). Persisted on [AppStore] so
+/// navigating away/back restores the draft. Attachments carry their local path,
+/// so an in-flight/errored image can still render its thumbnail.
+class ChatDraft {
+  String text;
+  List<UploadedFile> attachments;
+  ChatDraft({this.text = '', List<UploadedFile>? attachments})
+    : attachments = attachments ?? [];
+
+  bool get isEmpty => text.trim().isEmpty && attachments.isEmpty;
 }
 
 // ---- chat domain (streaming state) ----
@@ -453,18 +500,22 @@ class ChatPart {
     this.size,
   });
 
-  ChatPart copyWith({String? text, ToolState? state, String? type, String? tool}) =>
-      ChatPart(
-        id: id,
-        type: type ?? this.type,
-        text: text ?? this.text,
-        tool: tool ?? this.tool,
-        state: state ?? this.state,
-        code: code,
-        name: name,
-        mime: mime,
-        size: size,
-      );
+  ChatPart copyWith({
+    String? text,
+    ToolState? state,
+    String? type,
+    String? tool,
+  }) => ChatPart(
+    id: id,
+    type: type ?? this.type,
+    text: text ?? this.text,
+    tool: tool ?? this.tool,
+    state: state ?? this.state,
+    code: code,
+    name: name,
+    mime: mime,
+    size: size,
+  );
 }
 
 class ChatMessage {
@@ -475,6 +526,16 @@ class ChatMessage {
   final String createdAt;
   final int? seq;
 
+  /// Server chain pin (`prev_id`): the predecessor message id. Used by the
+  /// pin-based incremental sync to know where this message sits in the chain.
+  /// Empty for local-only (optimistic / streaming) messages.
+  final String prevId;
+
+  /// True when this bubble exists only on the client (an optimistic user
+  /// message or a streaming assistant bubble). Local messages are never
+  /// persisted as server history and are dropped on every reconcile.
+  final bool isLocal;
+
   ChatMessage({
     required this.id,
     required this.role,
@@ -482,17 +543,27 @@ class ChatMessage {
     required this.parts,
     this.createdAt = '',
     this.seq,
+    this.prevId = '',
+    this.isLocal = false,
   });
 
-  ChatMessage copyWith({String? id, String? status, List<ChatPart>? parts}) =>
-      ChatMessage(
-        id: id ?? this.id,
-        role: role,
-        status: status ?? this.status,
-        parts: parts ?? this.parts,
-        createdAt: createdAt,
-        seq: seq,
-      );
+  ChatMessage copyWith({
+    String? id,
+    String? status,
+    List<ChatPart>? parts,
+    String? prevId,
+    int? seq,
+    bool? isLocal,
+  }) => ChatMessage(
+    id: id ?? this.id,
+    role: role,
+    status: status ?? this.status,
+    parts: parts ?? this.parts,
+    createdAt: createdAt,
+    seq: seq ?? this.seq,
+    prevId: prevId ?? this.prevId,
+    isLocal: isLocal ?? this.isLocal,
+  );
 }
 
 // ---- other ----
@@ -515,14 +586,14 @@ class MailboxEntry {
     this.consumedAt,
   });
   factory MailboxEntry.fromJson(Map<String, dynamic> j) => MailboxEntry(
-        id: j['id'] as String? ?? '',
-        msgType: j['msg_type'] as String? ?? '',
-        payload: j['payload'] as String? ?? '',
-        effectiveAt: j['effective_at'] as String?,
-        status: j['status'] as String? ?? '',
-        createdAt: j['created_at'] as String? ?? '',
-        consumedAt: j['consumed_at'] as String?,
-      );
+    id: j['id'] as String? ?? '',
+    msgType: j['msg_type'] as String? ?? '',
+    payload: j['payload'] as String? ?? '',
+    effectiveAt: j['effective_at'] as String?,
+    status: j['status'] as String? ?? '',
+    createdAt: j['created_at'] as String? ?? '',
+    consumedAt: j['consumed_at'] as String?,
+  );
 }
 
 class ChangeEntry {
@@ -539,12 +610,12 @@ class ChangeEntry {
     required this.message,
   });
   factory ChangeEntry.fromJson(Map<String, dynamic> j) => ChangeEntry(
-        changeId: j['change_id'] as String? ?? '',
-        commitId: j['commit_id'] as String? ?? '',
-        author: j['author'] as String? ?? '',
-        timestamp: j['timestamp'] as String? ?? '',
-        message: j['message'] as String? ?? '',
-      );
+    changeId: j['change_id'] as String? ?? '',
+    commitId: j['commit_id'] as String? ?? '',
+    author: j['author'] as String? ?? '',
+    timestamp: j['timestamp'] as String? ?? '',
+    message: j['message'] as String? ?? '',
+  );
 }
 
 class FileEntry {
@@ -559,11 +630,11 @@ class FileEntry {
     required this.size,
   });
   factory FileEntry.fromJson(Map<String, dynamic> j) => FileEntry(
-        name: j['name'] as String? ?? '',
-        path: j['path'] as String? ?? '',
-        isDir: j['is_dir'] as bool? ?? false,
-        size: j['size'] as int? ?? 0,
-      );
+    name: j['name'] as String? ?? '',
+    path: j['path'] as String? ?? '',
+    isDir: j['is_dir'] as bool? ?? false,
+    size: j['size'] as int? ?? 0,
+  );
 }
 
 class DiffFile {
@@ -571,9 +642,9 @@ class DiffFile {
   final String? diffText;
   DiffFile({required this.path, this.diffText});
   factory DiffFile.fromJson(Map<String, dynamic> j) => DiffFile(
-        path: j['path'] as String? ?? '',
-        diffText: j['diff_text'] as String?,
-      );
+    path: j['path'] as String? ?? '',
+    diffText: j['diff_text'] as String?,
+  );
 }
 
 class FileCommit {
@@ -590,12 +661,12 @@ class FileCommit {
     required this.message,
   });
   factory FileCommit.fromJson(Map<String, dynamic> j) => FileCommit(
-        changeId: j['change_id'] as String? ?? '',
-        commitId: j['sha'] as String? ?? j['commit_id'] as String? ?? '',
-        author: j['author'] as String? ?? '',
-        timestamp: j['timestamp'] as String? ?? '',
-        message: j['description'] as String? ?? j['message'] as String? ?? '',
-      );
+    changeId: j['change_id'] as String? ?? '',
+    commitId: j['sha'] as String? ?? j['commit_id'] as String? ?? '',
+    author: j['author'] as String? ?? '',
+    timestamp: j['timestamp'] as String? ?? '',
+    message: j['description'] as String? ?? j['message'] as String? ?? '',
+  );
 }
 
 /// Parse a `{locale: text}` map (from JSON) into a String->String map.
@@ -631,25 +702,27 @@ class Preset {
     this.isSystem = false,
   });
   factory Preset.fromJson(Map<String, dynamic> j) => Preset(
-        id: j['id'] as String? ?? '',
-        systemPrompt: j['system_prompt'] as String? ?? '',
-        systemPromptI18n: _mapStringString(j['system_prompt_i18n']),
-        tools: (j['tools'] as List? ?? []).map((e) => e.toString()).toList(),
-        maxTurns: j['max_turns'] as int? ?? 30,
-        isSystem: j['is_system'] as bool? ?? false,
-      );
+    id: j['id'] as String? ?? '',
+    systemPrompt: j['system_prompt'] as String? ?? '',
+    systemPromptI18n: _mapStringString(j['system_prompt_i18n']),
+    tools: (j['tools'] as List? ?? []).map((e) => e.toString()).toList(),
+    maxTurns: j['max_turns'] as int? ?? 30,
+    isSystem: j['is_system'] as bool? ?? false,
+  );
+
   /// The system prompt localized for [locale] ('zh'/'en'), falling back to the
   /// default prompt when the locale has no translation.
   String localizedPrompt(String locale) {
     if (systemPromptI18n.containsKey(locale)) return systemPromptI18n[locale]!;
     return systemPrompt;
   }
+
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'system_prompt': systemPrompt,
-        'tools': tools,
-        'max_turns': maxTurns,
-      };
+    'id': id,
+    'system_prompt': systemPrompt,
+    'tools': tools,
+    'max_turns': maxTurns,
+  };
 }
 
 class ToolConfigField {
@@ -666,12 +739,12 @@ class ToolConfigField {
     this.dependsOnProvider,
   });
   factory ToolConfigField.fromJson(Map<String, dynamic> j) => ToolConfigField(
-        key: j['key'] as String? ?? '',
-        label: j['label'] as String? ?? '',
-        type: j['type'] as String? ?? '',
-        placeholder: j['placeholder'] as String? ?? '',
-        dependsOnProvider: j['dependsOnProvider'] as String?,
-      );
+    key: j['key'] as String? ?? '',
+    label: j['label'] as String? ?? '',
+    type: j['type'] as String? ?? '',
+    placeholder: j['placeholder'] as String? ?? '',
+    dependsOnProvider: j['dependsOnProvider'] as String?,
+  );
 }
 
 class ToolInfo {
@@ -692,20 +765,20 @@ class ToolInfo {
     this.requiredConfig = const [],
   });
   factory ToolInfo.fromJson(Map<String, dynamic> j) => ToolInfo(
-        name: j['name'] as String? ?? '',
-        description: j['description'] as String? ?? '',
-        category: j['category'] as String? ?? '',
-        parameters: (j['parameters'] as Map?)?.cast<String, dynamic>(),
-        configFields: (j['configFields'] as List? ?? [])
-            .map((e) => ToolConfigField.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        config: (j['config'] as List? ?? [])
-            .map((e) => ToolConfig.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        requiredConfig: (j['required_config'] as List? ?? [])
-            .map((e) => '$e')
-            .toList(),
-      );
+    name: j['name'] as String? ?? '',
+    description: j['description'] as String? ?? '',
+    category: j['category'] as String? ?? '',
+    parameters: (j['parameters'] as Map?)?.cast<String, dynamic>(),
+    configFields: (j['configFields'] as List? ?? [])
+        .map((e) => ToolConfigField.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    config: (j['config'] as List? ?? [])
+        .map((e) => ToolConfig.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    requiredConfig: (j['required_config'] as List? ?? [])
+        .map((e) => '$e')
+        .toList(),
+  );
 
   /// Parsed parameter tree (properties + nested array/object items),
   /// honoring the required list. Empty when parameters is missing/empty.
@@ -729,13 +802,13 @@ class ToolConfig {
     this.scope = 'global',
   });
   factory ToolConfig.fromJson(Map<String, dynamic> j) => ToolConfig(
-        name: j['name'] as String? ?? '',
-        type: j['type'] as String? ?? 'string',
-        enumValues: (j['enum_values'] as List? ?? []).map((e) => '$e').toList(),
-        defaultValue: j['default'],
-        description: j['description'] as String? ?? '',
-        scope: j['scope'] as String? ?? 'global',
-      );
+    name: j['name'] as String? ?? '',
+    type: j['type'] as String? ?? 'string',
+    enumValues: (j['enum_values'] as List? ?? []).map((e) => '$e').toList(),
+    defaultValue: j['default'],
+    description: j['description'] as String? ?? '',
+    scope: j['scope'] as String? ?? 'global',
+  );
 }
 
 /// A single tool input parameter (recursively nests array/object items).
@@ -763,7 +836,8 @@ class ToolParam {
     final out = <ToolParam>[];
     final properties = schema['properties'];
     if (properties is! Map) return out;
-    final requiredList = (schema['required'] as List?)?.map((e) => '$e').toSet() ??
+    final requiredList =
+        (schema['required'] as List?)?.map((e) => '$e').toSet() ??
         const <String>{};
     properties.forEach((key, value) {
       if (value is! Map) return;
@@ -776,24 +850,30 @@ class ToolParam {
         final im = items.cast<String, dynamic>();
         if ((im['type'] as String?) == 'array' ||
             (im['properties'] as Map?)?.isNotEmpty == true) {
-          children.addAll(parseSchema({
-            'type': 'object',
-            'properties': im['properties'],
-            'required': im['required'],
-          }));
+          children.addAll(
+            parseSchema({
+              'type': 'object',
+              'properties': im['properties'],
+              'required': im['required'],
+            }),
+          );
         }
       } else if (type == 'object' && v['properties'] is Map) {
         children.addAll(parseSchema(v));
       }
-      out.add(ToolParam(
-        name: '$key',
-        type: type,
-        description: (v['description'] as String?) ?? '',
-        required: requiredList.contains('$key'),
-        enumValues: v['enum'] is List ? (v['enum'] as List).map((e) => '$e').toList() : null,
-        defaultValue: v['default'] == null ? null : '${v['default']}',
-        children: children,
-      ));
+      out.add(
+        ToolParam(
+          name: '$key',
+          type: type,
+          description: (v['description'] as String?) ?? '',
+          required: requiredList.contains('$key'),
+          enumValues: v['enum'] is List
+              ? (v['enum'] as List).map((e) => '$e').toList()
+              : null,
+          defaultValue: v['default'] == null ? null : '${v['default']}',
+          children: children,
+        ),
+      );
     });
     return out;
   }
@@ -802,42 +882,37 @@ class ToolParam {
 class ProviderModel {
   final String id;
   final String name;
+
+  /// Model context window (tokens). For a TEXT provider every model requires a
+  /// positive value (drives compaction budgets). The gateway is a superset:
+  /// `> 0` marks a text model, `0` marks a multimodal model (image/video/
+  /// speech/transcription) used by a tool.
   final int? contextLimit;
-  final int? outputLimit;
-  final int? maxTokens;
-  final int? temperature;
-  final bool reasoning;
-  final bool toolCall;
+
+  /// Display-only model KIND as advertised by the gateway `/config`, normalized
+  /// to a short tag: `text` | `image` | `video` | `speech` | `transcription` |
+  /// `embedding` | `reranking` | `realtime`. Empty for a plain text provider or
+  /// an unknown kind. Which TOOL serves a multimodal model is still implied by
+  /// the tool config knob; this only drives the UI label/icon.
+  final String modelType;
   ProviderModel({
     required this.id,
     required this.name,
     this.contextLimit,
-    this.outputLimit,
-    this.maxTokens,
-    this.temperature,
-    this.reasoning = false,
-    this.toolCall = false,
+    this.modelType = '',
   });
   factory ProviderModel.fromJson(Map<String, dynamic> j) => ProviderModel(
-        id: j['id'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        contextLimit: j['context_limit'] as int?,
-        outputLimit: j['output_limit'] as int?,
-        maxTokens: j['max_tokens'] as int?,
-        temperature: j['temperature'] as int?,
-        reasoning: j['reasoning'] as bool? ?? false,
-        toolCall: j['tool_call'] as bool? ?? false,
-      );
+    id: j['id'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    contextLimit: j['context_limit'] as int?,
+    modelType: j['model_type'] as String? ?? '',
+  );
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        if (contextLimit != null) 'context_limit': contextLimit,
-        if (outputLimit != null) 'output_limit': outputLimit,
-        if (maxTokens != null) 'max_tokens': maxTokens,
-        if (temperature != null) 'temperature': temperature,
-        'reasoning': reasoning,
-        'tool_call': toolCall,
-      };
+    'id': id,
+    'name': name,
+    if (contextLimit != null) 'context_limit': contextLimit,
+    if (modelType.isNotEmpty) 'model_type': modelType,
+  };
 }
 
 class ProviderInfo {
@@ -856,23 +931,69 @@ class ProviderInfo {
     required this.models,
   });
   factory ProviderInfo.fromJson(Map<String, dynamic> j) => ProviderInfo(
-        providerId: j['provider_id'] as String? ?? '',
-        apiType: j['api_type'] as String? ?? '',
-        baseUrl: j['base_url'] as String? ?? '',
-        apiKey: j['api_key'] as String? ?? '',
-        headers: (j['headers'] as Map?)?.cast<String, String>(),
-        models: (j['models'] as List? ?? [])
-            .map((e) => ProviderModel.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    providerId: j['provider_id'] as String? ?? '',
+    apiType: j['api_type'] as String? ?? '',
+    baseUrl: j['base_url'] as String? ?? '',
+    apiKey: j['api_key'] as String? ?? '',
+    headers: (j['headers'] as Map?)?.cast<String, String>(),
+    models: (j['models'] as List? ?? [])
+        .map((e) => ProviderModel.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
   Map<String, dynamic> toJson() => {
-        'provider_id': providerId,
-        'api_type': apiType,
-        'base_url': baseUrl,
-        'api_key': apiKey,
-        if (headers != null) 'headers': headers,
-        'models': models.map((m) => m.toJson()).toList(),
-      };
+    'provider_id': providerId,
+    'api_type': apiType,
+    'base_url': baseUrl,
+    'api_key': apiKey,
+    if (headers != null) 'headers': headers,
+    'models': models.map((m) => m.toJson()).toList(),
+  };
+}
+
+/// Mutable draft of a provider while it is being added/edited across the
+/// provider-form and model-form pages. Held on [AppStore.providerDraft] so the
+/// two form pages (which live at different depths of the config stack, and are
+/// disposed/rebuilt as the user navigates) share one editable buffer.
+class ProviderDraft {
+  /// The provider id being edited, or null for a brand-new provider.
+  String? originalId;
+  String id;
+  String apiType;
+  String baseUrl;
+  String apiKey;
+  List<ProviderModel> models;
+
+  ProviderDraft({
+    this.originalId,
+    this.id = '',
+    this.apiType = 'openai-compatible',
+    this.baseUrl = '',
+    this.apiKey = '',
+    List<ProviderModel>? models,
+  }) : models = models ?? [];
+
+  factory ProviderDraft.fromProvider(ProviderInfo p) => ProviderDraft(
+    originalId: p.providerId,
+    id: p.providerId,
+    apiType: p.apiType,
+    baseUrl: p.baseUrl,
+    apiKey: p.apiKey,
+    models: [...p.models],
+  );
+
+  bool get isEdit => originalId != null;
+}
+
+class ModelVariantInfo {
+  final String id;
+  final String name;
+  final String description;
+  ModelVariantInfo({required this.id, this.name = '', this.description = ''});
+  factory ModelVariantInfo.fromJson(Map<String, dynamic> j) => ModelVariantInfo(
+    id: j['id'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    description: j['description'] as String? ?? '',
+  );
 }
 
 class ModelInfo {
@@ -880,27 +1001,31 @@ class ModelInfo {
   final String name;
   final String providerId;
   final int? contextLimit;
-  final int? outputLimit;
   final bool reasoning;
   final bool toolCall;
+
+  /// Selectable reasoning variants (models.dev catalog).
+  final List<ModelVariantInfo> variants;
   ModelInfo({
     required this.id,
     required this.name,
     this.providerId = '',
     this.contextLimit,
-    this.outputLimit,
     this.reasoning = false,
     this.toolCall = false,
+    this.variants = const [],
   });
   factory ModelInfo.fromJson(Map<String, dynamic> j) => ModelInfo(
-        id: j['id'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        providerId: j['provider_id'] as String? ?? '',
-        contextLimit: j['context_limit'] as int?,
-        outputLimit: j['output_limit'] as int?,
-        reasoning: j['reasoning'] as bool? ?? false,
-        toolCall: j['tool_call'] as bool? ?? false,
-      );
+    id: j['id'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    providerId: j['provider_id'] as String? ?? '',
+    contextLimit: j['context_limit'] as int?,
+    reasoning: j['reasoning'] as bool? ?? false,
+    toolCall: j['tool_call'] as bool? ?? false,
+    variants: (j['variants'] as List? ?? [])
+        .map((e) => ModelVariantInfo.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
 // ---- container / ops ----
@@ -923,14 +1048,14 @@ class Sandbox {
     required this.syncedRev,
   });
   factory Sandbox.fromJson(Map<String, dynamic> j) => Sandbox(
-        containerId: j['container_id'] as String? ?? '',
-        session: j['session'] as String? ?? '',
-        podName: j['pod_name'] as String? ?? '',
-        status: j['status'] as String? ?? '',
-        workerUrl: j['worker_url'] as String? ?? '',
-        podIp: j['pod_ip'] as String? ?? '',
-        syncedRev: j['synced_rev'] as String? ?? '',
-      );
+    containerId: j['container_id'] as String? ?? '',
+    session: j['session'] as String? ?? '',
+    podName: j['pod_name'] as String? ?? '',
+    status: j['status'] as String? ?? '',
+    workerUrl: j['worker_url'] as String? ?? '',
+    podIp: j['pod_ip'] as String? ?? '',
+    syncedRev: j['synced_rev'] as String? ?? '',
+  );
 }
 
 class Deployment {
@@ -953,15 +1078,15 @@ class Deployment {
     this.session,
   });
   factory Deployment.fromJson(Map<String, dynamic> j) => Deployment(
-        name: j['name'] as String? ?? '',
-        image: j['image'] as String? ?? '',
-        replicas: j['replicas'] as int? ?? 0,
-        ready: j['ready'] as int? ?? 0,
-        namespace: j['namespace'] as String? ?? '',
-        age: j['age'] as String? ?? '',
-        ports: (j['ports'] as List? ?? []).map((e) => e as int).toList(),
-        session: j['session'] as String?,
-      );
+    name: j['name'] as String? ?? '',
+    image: j['image'] as String? ?? '',
+    replicas: j['replicas'] as int? ?? 0,
+    ready: j['ready'] as int? ?? 0,
+    namespace: j['namespace'] as String? ?? '',
+    age: j['age'] as String? ?? '',
+    ports: (j['ports'] as List? ?? []).map((e) => e as int).toList(),
+    session: j['session'] as String?,
+  );
 }
 
 class DeploymentPod {
@@ -982,14 +1107,14 @@ class DeploymentPod {
     required this.restarts,
   });
   factory DeploymentPod.fromJson(Map<String, dynamic> j) => DeploymentPod(
-        name: j['name'] as String? ?? '',
-        ip: j['ip'] as String? ?? '',
-        phase: j['phase'] as String? ?? '',
-        ready: j['ready'] as bool? ?? false,
-        image: j['image'] as String? ?? '',
-        age: j['age'] as String? ?? '',
-        restarts: j['restarts'] as int? ?? 0,
-      );
+    name: j['name'] as String? ?? '',
+    ip: j['ip'] as String? ?? '',
+    phase: j['phase'] as String? ?? '',
+    ready: j['ready'] as bool? ?? false,
+    image: j['image'] as String? ?? '',
+    age: j['age'] as String? ?? '',
+    restarts: j['restarts'] as int? ?? 0,
+  );
 }
 
 class DeploymentEvent {
@@ -1004,11 +1129,11 @@ class DeploymentEvent {
     this.age = '',
   });
   factory DeploymentEvent.fromJson(Map<String, dynamic> j) => DeploymentEvent(
-        type: j['type'] as String? ?? '',
-        reason: j['reason'] as String? ?? '',
-        message: j['message'] as String? ?? '',
-        age: j['age'] as String? ?? '',
-      );
+    type: j['type'] as String? ?? '',
+    reason: j['reason'] as String? ?? '',
+    message: j['message'] as String? ?? '',
+    age: j['age'] as String? ?? '',
+  );
 }
 
 class ContainerfileTemplate {
@@ -1040,14 +1165,14 @@ class JobInfo {
     this.stdout,
   });
   factory JobInfo.fromJson(Map<String, dynamic> j) => JobInfo(
-        id: j['id'] as String? ?? '',
-        command: j['command'] as String? ?? '',
-        state: j['state'] as String? ?? '',
-        exitCode: j['exit_code'] as int? ?? 0,
-        startedAt: j['started_at'] as int?,
-        finishedAt: j['finished_at'] as int?,
-        stdout: j['stdout'] as String?,
-      );
+    id: j['id'] as String? ?? '',
+    command: j['command'] as String? ?? '',
+    state: j['state'] as String? ?? '',
+    exitCode: j['exit_code'] as int? ?? 0,
+    startedAt: j['started_at'] as int?,
+    finishedAt: j['finished_at'] as int?,
+    stdout: j['stdout'] as String?,
+  );
 }
 
 class ExecResult {
@@ -1066,13 +1191,13 @@ class ExecResult {
     this.error,
   });
   factory ExecResult.fromJson(Map<String, dynamic> j) => ExecResult(
-        exitCode: j['exit_code'] as int?,
-        output: j['output'] as String?,
-        jobId: j['job_id'] as String?,
-        backgrounded: j['backgrounded'] as bool? ?? false,
-        note: j['note'] as String?,
-        error: j['error'] as String?,
-      );
+    exitCode: j['exit_code'] as int?,
+    output: j['output'] as String?,
+    jobId: j['job_id'] as String?,
+    backgrounded: j['backgrounded'] as bool? ?? false,
+    note: j['note'] as String?,
+    error: j['error'] as String?,
+  );
 }
 
 class PublishSpec {
@@ -1085,11 +1210,10 @@ class PublishSpec {
     required this.required,
   });
   factory PublishSpec.fromJson(Map<String, dynamic> j) => PublishSpec(
-        protocol: j['protocol'] as String? ?? '',
-        args: (j['args'] as List? ?? []).map((e) => e.toString()).toList(),
-        required:
-            (j['required'] as List? ?? []).map((e) => e.toString()).toList(),
-      );
+    protocol: j['protocol'] as String? ?? '',
+    args: (j['args'] as List? ?? []).map((e) => e.toString()).toList(),
+    required: (j['required'] as List? ?? []).map((e) => e.toString()).toList(),
+  );
 }
 
 class OpsStatus {
@@ -1098,10 +1222,10 @@ class OpsStatus {
   final int sandboxes;
   OpsStatus({required this.ok, required this.version, required this.sandboxes});
   factory OpsStatus.fromJson(Map<String, dynamic> j) => OpsStatus(
-        ok: j['ok'] as bool? ?? false,
-        version: j['version'] as String? ?? '',
-        sandboxes: j['sandboxes'] as int? ?? 0,
-      );
+    ok: j['ok'] as bool? ?? false,
+    version: j['version'] as String? ?? '',
+    sandboxes: j['sandboxes'] as int? ?? 0,
+  );
 }
 
 // ---- packages ----
@@ -1110,14 +1234,16 @@ class PackageTypeEntry {
   final String type;
   final String upstream;
   final int packages;
-  PackageTypeEntry(
-      {required this.type, required this.upstream, this.packages = 0});
-  factory PackageTypeEntry.fromJson(Map<String, dynamic> j) =>
-      PackageTypeEntry(
-        type: j['type'] as String? ?? '',
-        upstream: j['upstream'] as String? ?? '',
-        packages: j['packages'] as int? ?? 0,
-      );
+  PackageTypeEntry({
+    required this.type,
+    required this.upstream,
+    this.packages = 0,
+  });
+  factory PackageTypeEntry.fromJson(Map<String, dynamic> j) => PackageTypeEntry(
+    type: j['type'] as String? ?? '',
+    upstream: j['upstream'] as String? ?? '',
+    packages: j['packages'] as int? ?? 0,
+  );
 }
 
 class UnifiedPackageEntry {
@@ -1169,13 +1295,13 @@ class PackageVersion {
     required this.files,
   });
   factory PackageVersion.fromJson(Map<String, dynamic> j) => PackageVersion(
-        version: j['version'] as String? ?? '',
-        downloadCount: j['download_count'] as int? ?? 0,
-        createdUnix: j['created_unix'] as int? ?? 0,
-        files: (j['files'] as List? ?? [])
-            .map((e) => PackageVersionFile.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    version: j['version'] as String? ?? '',
+    downloadCount: j['download_count'] as int? ?? 0,
+    createdUnix: j['created_unix'] as int? ?? 0,
+    files: (j['files'] as List? ?? [])
+        .map((e) => PackageVersionFile.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
 class GitCommit {
@@ -1192,12 +1318,12 @@ class GitCommit {
     required this.message,
   });
   factory GitCommit.fromJson(Map<String, dynamic> j) => GitCommit(
-        changeId: j['change_id'] as String? ?? '',
-        commitId: j['commit_id'] as String? ?? '',
-        author: j['author'] as String? ?? '',
-        timestamp: j['timestamp'] as String? ?? '',
-        message: j['message'] as String? ?? '',
-      );
+    changeId: j['change_id'] as String? ?? '',
+    commitId: j['commit_id'] as String? ?? '',
+    author: j['author'] as String? ?? '',
+    timestamp: j['timestamp'] as String? ?? '',
+    message: j['message'] as String? ?? '',
+  );
 }
 
 class GitTag {
@@ -1205,9 +1331,9 @@ class GitTag {
   final String target;
   GitTag({required this.name, required this.target});
   factory GitTag.fromJson(Map<String, dynamic> j) => GitTag(
-        name: j['name'] as String? ?? '',
-        target: j['target'] as String? ?? '',
-      );
+    name: j['name'] as String? ?? '',
+    target: j['target'] as String? ?? '',
+  );
 }
 
 class RepoMirror {
@@ -1222,11 +1348,11 @@ class RepoMirror {
     required this.hasSecret,
   });
   factory RepoMirror.fromJson(Map<String, dynamic> j) => RepoMirror(
-        org: j['org'] as String? ?? '',
-        repo: j['repo'] as String? ?? '',
-        mirrorUrl: j['mirror_url'] as String? ?? '',
-        hasSecret: j['has_secret'] as bool? ?? false,
-      );
+    org: j['org'] as String? ?? '',
+    repo: j['repo'] as String? ?? '',
+    mirrorUrl: j['mirror_url'] as String? ?? '',
+    hasSecret: j['has_secret'] as bool? ?? false,
+  );
 }
 
 /// Stored per-repo mirror config (urls + whether a push secret is set; the
@@ -1235,21 +1361,18 @@ class MirrorCfg {
   final String pullUrl;
   final String pushUrl;
   final bool pushSecretSet;
-  MirrorCfg({
-    this.pullUrl = '',
-    this.pushUrl = '',
-    this.pushSecretSet = false,
-  });
+  MirrorCfg({this.pullUrl = '', this.pushUrl = '', this.pushSecretSet = false});
 }
+
 /// jj-lab branch (GET /repos/{org}/{repo}/branches).
 class BranchInfo {
   final String name;
   final String sha;
   BranchInfo({required this.name, required this.sha});
   factory BranchInfo.fromJson(Map<String, dynamic> j) => BranchInfo(
-        name: j['name'] as String? ?? '',
-        sha: j['sha'] as String? ?? '',
-      );
+    name: j['name'] as String? ?? '',
+    sha: j['sha'] as String? ?? '',
+  );
 }
 
 /// A release asset (jj-lab releases.rs): name/size/digest/content_type.
@@ -1265,11 +1388,11 @@ class ReleaseAsset {
     required this.contentType,
   });
   factory ReleaseAsset.fromJson(Map<String, dynamic> j) => ReleaseAsset(
-        name: j['name'] as String? ?? '',
-        size: (j['size'] as num?)?.toInt() ?? 0,
-        digest: j['digest'] as String? ?? '',
-        contentType: j['content_type'] as String? ?? '',
-      );
+    name: j['name'] as String? ?? '',
+    size: (j['size'] as num?)?.toInt() ?? 0,
+    digest: j['digest'] as String? ?? '',
+    contentType: j['content_type'] as String? ?? '',
+  );
 }
 
 /// jj-lab release (GET /repos/{org}/{repo}/releases).
@@ -1289,19 +1412,17 @@ class Release {
     required this.assets,
   });
   factory Release.fromJson(Map<String, dynamic> j) => Release(
-        tagName: j['tag_name'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        body: j['body'] as String? ?? '',
-        draft: j['draft'] as bool? ?? false,
-        prerelease: j['prerelease'] as bool? ?? false,
-        assets: ((j['assets'] as List?) ?? [])
-            .map((e) => ReleaseAsset.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    tagName: j['tag_name'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    body: j['body'] as String? ?? '',
+    draft: j['draft'] as bool? ?? false,
+    prerelease: j['prerelease'] as bool? ?? false,
+    assets: ((j['assets'] as List?) ?? [])
+        .map((e) => ReleaseAsset.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
-/// User administration DTOs. A user IS the ownership boundary: it owns
-/// namespaces/repositories, holds tokens, and is bound to its own agent tenant.
 class UserInfo {
   final String id;
   final String username;
@@ -1317,14 +1438,17 @@ class UserInfo {
   });
 }
 
+
 class UserTokenInfo {
   final String id;
   final String createdAt;
   UserTokenInfo({required this.id, required this.createdAt});
 }
 
+
 class UserCreateResult {
   final UserInfo user;
   final String token;
   UserCreateResult({required this.user, required this.token});
 }
+

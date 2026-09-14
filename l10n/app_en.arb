@@ -1,13 +1,13 @@
 {
   "@@locale": "en",
   "@@context": "ZergX",
-  "appTitle": "ZergX",
+  "appTitle": "Agent",
   "gatewayUrl": "Gateway URL",
   "tokenLabel": "Token",
   "connect": "Connect",
   "connecting": "Connecting...",
   "search": "Search",
-  "searchHint": "Search sessions / org / repo / branch",
+  "searchHint": "Search session name",
   "createNewOrg": "New organization",
   "createNewRepo": "New repo…",
   "createCloneRepo": "Clone repo…",
@@ -40,6 +40,8 @@
   "copy": "Copy",
   "error": "Error",
   "undo": "Undo",
+  "retry": "Retry",
+  "editMessage": "Edit message",
   "undoTitle": "Undo this message?",
   "undoBody": "This deletes the message and everything after it.",
   "cancel": "Cancel",
@@ -60,11 +62,21 @@
     }
   },
   "attach": "Attach file",
+  "dropToAttach": "Drop to add as attachment",
+  "folderNotAllowed": "Folders can't be attached — drop individual files",
   "image": "image",
   "takePhoto": "Take photo",
   "chooseImage": "Choose from gallery",
   "chooseFile": "Choose file",
   "waitUpload": "Attachment is still uploading",
+  "uploadFailedRetry": "{arg1} attachment(s) failed to upload — retry or remove them before sending",
+  "@uploadFailedRetry": {
+    "placeholders": {
+      "arg1": {
+        "type": "String"
+      }
+    }
+  },
   "downloaded": "Downloaded to",
   "sessionSettings": "Session settings",
   "compactHistory": "Compact history",
@@ -87,6 +99,8 @@
   "you": "me",
   "settingsTitle": "Session Settings",
   "modelLabel": "Model",
+  "variantLabel": "Reasoning variant",
+  "variantNone": "Default (no variant)",
   "presetLabel": "Preset",
   "maxTurnsLabel": "Max Turns",
   "sysPromptLabel": "System Prompt (blank = inherit)",
@@ -99,6 +113,50 @@
       }
     }
   },
+  "deleteSessionsTitle": "Delete sessions",
+  "deleteSessionsBody": "Delete {arg1} selected sessions? This cannot be undone.",
+  "@deleteSessionsBody": {
+    "placeholders": {
+      "arg1": {
+        "type": "String"
+      }
+    }
+  },
+  "selectSessions": "Select",
+  "selectAll": "Select all",
+  "selectNone": "Deselect all",
+  "selectedCount": "{arg1} selected",
+  "@selectedCount": {
+    "placeholders": {
+      "arg1": {
+        "type": "String"
+      }
+    }
+  },
+  "addModel": "Add model",
+  "noTest": "No test",
+  "holdToTalk": "Hold to talk",
+  "releaseToSend": "Release to send",
+  "abort": "Abort",
+  "edit": "Edit",
+  "voiceMode": "Voice",
+  "keyboardMode": "Keyboard",
+  "sessionInfo": "Session info",
+  "voiceStop": "Stop & send",
+  "voiceRecording": "Recording…",
+  "voicePermission": "Microphone permission denied",
+  "recordVoice": "Record voice",
+  "voiceTooShort": "Recording too short",
+  "uploading": "Uploading…",
+  "uploadFailed": "Upload failed",
+  "capText": "text",
+  "capImage": "image",
+  "capVideo": "video",
+  "capSpeech": "speech",
+  "capTranscription": "ASR",
+  "capEmbedding": "embedding",
+  "capReranking": "rerank",
+  "capRealtime": "realtime",
   "newOrg": "New organization",
   "orgNameLabel": "Organization name",
   "newRepoIn": "New repo in {arg1}",
@@ -184,11 +242,11 @@
   "language": "Language",
   "logout": "Log out",
   "logoutBody": "This clears the saved gateway URL and token and returns to the login screen.",
-  "switchBackend": "Switch backend",
-  "backendsTitle": "Backends",
-  "noSavedBackends": "No saved backends yet.",
-  "addBackend": "Add new backend",
-  "deleteBackend": "Remove backend",
+  "switchBackend": "Switch user",
+  "backendsTitle": "Users",
+  "noSavedBackends": "No saved users yet.",
+  "addBackend": "Add new user",
+  "deleteBackend": "Remove user",
   "backendSection": "Backend",
   "providerTemplate": "Template (models.dev)",
   "providerTemplateHint": "Pick a provider to prefill",
@@ -568,6 +626,7 @@
   "modelsLabel": "Models",
   "modelIdLabel": "model id…",
   "contextLengthLabel": "context",
+  "contextLengthRequired": "Context length is required (positive number).",
   "add": "Add",
   "enterToAddHint": "Enter to add a model tag",
   "turnsByPreset": "Max turns is set by the selected preset.",
@@ -575,6 +634,41 @@
   "connected": "Connected",
   "connectionError": "Connection error: {arg1}",
   "toolInputParams": "Input",
+  "content": "Content",
+  "metadata": "Metadata",
+  "newSession": "New session",
+  "noSessions": "No sessions",
+  "apiTypeGateway": "Vercel AI Gateway",
+  "providersSection": "Text providers",
+  "gatewaySection": "Multimodal gateway",
+  "gatewayTitle": "AI Gateway",
+  "gatewayHint": "The single Vercel-compatible gateway. Text models need a context length; models without one (image/video/speech/transcription) are used by tools.",
+  "gatewayModelsHint": "Add the gateway's models: give text models a context length, leave multimodal models empty.",
+  "multimodal": "multimodal",
+  "contextOptional": "optional — empty marks a multimodal model",
+  "testAs": "Test as",
+  "modelNameLabel": "display name…",
+  "discoverModels": "Auto-detect models",
+  "discoveringModels": "Detecting…",
+  "discoveredModels": "Discovered {arg1} models",
+  "@discoveredModels": {
+    "placeholders": {
+      "arg1": {
+        "type": "Object"
+      }
+    }
+  },
+  "gatewayTextModels": "Text / vision models",
+  "gatewayTextModelsHint": "Add a language model (needs a context length).",
+  "gatewayMultimodalModels": "Multimodal models",
+  "gatewayMultimodalModelsHint": "Add image/video/speech/transcription models (no context length).",
+  "authExpiredTitle": "Sign-in required",
+  "authExpiredBody": "The server rejected the request: the token is missing, invalid, or revoked. Update the connection token and try again.",
+  "signInAgain": "Sign in again",
+  "defaults": "Defaults",
+  "defaultsHint": "Applied automatically to new sessions (empty = built-in default)",
+  "defaultModel": "Default model",
+  "defaultPreset": "Default preset",
   "tenantsSection": "USERS",
   "tenantsTitle": "Users",
   "addTenant": "New user",
@@ -584,5 +678,28 @@
   "tenantTokenOnce": "This user's token (shown once — copy it now)",
   "tenantMembers": "Tokens",
   "tenantCreated": "User created",
-  "tenantsEmpty": "No users yet."
+  "tenantsEmpty": "No users yet.",
+  "mergeRequests": "Merge requests",
+  "newMergeRequest": "New merge request",
+  "mrSource": "Source branch",
+  "mrTarget": "Target branch",
+  "mrMerge": "Merge",
+  "mrClose": "Close",
+  "mrReopen": "Reopen",
+  "mrApproved": "Approved",
+  "mrRequestChanges": "Request changes",
+  "mrStateOpen": "open",
+  "mrStateMerged": "merged",
+  "mrStateClosed": "closed",
+  "collaborators": "Collaborators",
+  "addCollaborator": "Add collaborator",
+  "role": "Role",
+  "roleOwner": "Owner",
+  "roleMaintainer": "Maintainer",
+  "roleDeveloper": "Developer",
+  "removeMember": "Remove",
+  "repoVisibility": "Visibility",
+  "visibilityPublic": "Public",
+  "visibilityPrivate": "Private",
+  "changeVisibility": "Change visibility"
 }
