@@ -10,6 +10,7 @@ import 'package:connectrpc/http2.dart';
 import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
 import 'package:easylab_client_sdk/easylab_client_sdk.dart' as sdk;
+import 'package:easylab_client_sdk/worker.dart' as worker;
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart' as wkt;
 
 import 'models.dart';
@@ -70,6 +71,8 @@ class EasyLabApi {
   late final sdk.AgentServiceClient _agent;
   late final sdk.LabServiceClient _lab;
   late final sdk.OpsServiceClient _ops;
+  late final sdk.SandboxServiceClient _sandbox;
+  late final sdk.WorkflowServiceClient _workflow;
   late final sdk.RegistryServiceClient _registry;
   late final sdk.UserServiceClient _user;
 
@@ -89,6 +92,8 @@ class EasyLabApi {
     _agent = sdk.AgentServiceClient(_transport);
     _lab = sdk.LabServiceClient(_transport);
     _ops = sdk.OpsServiceClient(_transport);
+    _sandbox = sdk.SandboxServiceClient(_transport);
+    _workflow = sdk.WorkflowServiceClient(_transport);
     _registry = sdk.RegistryServiceClient(_transport);
     _user = sdk.UserServiceClient(_transport);
   }
@@ -320,11 +325,13 @@ class EasyLabApi {
     });
   }
 
-  /// Streams a task's log (agent.v1/ops TaskLog over Connect).
-  Stream<dynamic> taskStream(String buildId) {
-    return _ops.taskLog(sdk.TaskLogRequest(id: buildId)).map((r) {
-      return {'stream': r.stream, 'line': r.line};
-    });
+  /// Streams a CI build job's live log (WorkflowService RunJobLog over
+  /// Connect). Each event is `{stream, line}`; a `state` stream marks a
+  /// terminal state.
+  Stream<dynamic> runJobLog(String runId, String jobId) {
+    return _workflow
+        .runJobLog(sdk.RunJobLogRequest(runId: runId, jobId: jobId))
+        .map((r) => {'stream': r.stream, 'line': r.line});
   }
 
   // ---- repos ----
@@ -727,20 +734,57 @@ class EasyLabApi {
         .map((k, v) => MapEntry(k, StructUtils.valueToJson(v)));
   }
 
-  // ---- containers / ops ----
+  // ---- containers / sandboxes ----
 
+  /// Managed worker sandboxes for the current user (easylab SandboxService).
   Future<List<Sandbox>> sandboxes() async {
-    final r = await _ops.listServices(sdk.ListServicesRequest());
-    return r.services.map((s) => Sandbox(
-      containerId: s.name,
-      session: s.session,
-      podName: s.name,
-      status: s.status,
-      workerUrl: s.url,
-      podIp: s.podIp,
-      syncedRev: '',
-    )).toList();
+    final r = await _sandbox.listSandboxes(sdk.ListSandboxesRequest());
+    return r.sandboxes.map((s) {
+      final session = s.org.isNotEmpty
+          ? '${s.org}:${s.repo}:${s.branch}'
+          : s.name;
+      return Sandbox(
+        containerId: s.name,
+        session: session,
+        podName: s.name,
+        status: s.phase.isEmpty ? 'stopped' : s.phase,
+        workerUrl: '',
+        podIp: s.podIp,
+        syncedRev: s.syncedRev,
+      );
+    }).toList();
   }
+
+  /// Launches (or relaunches) the session sandbox for an org/repo/branch.
+  Future<Sandbox> launchSandbox(
+      String org, String repo, String branch, String baseImage) async {
+    final r = await _sandbox.launchSandbox(sdk.LaunchSandboxRequest(
+      name: _sandboxName(org, repo, branch),
+      org: org,
+      repo: repo,
+      branch: branch,
+      baseImage: baseImage,
+      runtime: 'linux',
+    ));
+    final s = r.sandbox;
+    return Sandbox(
+      containerId: s.name,
+      session: '${s.org}:${s.repo}:${s.branch}',
+      podName: s.name,
+      status: s.phase.isEmpty ? 'stopped' : s.phase,
+      workerUrl: '',
+      podIp: s.podIp,
+      syncedRev: s.syncedRev,
+    );
+  }
+
+  /// Sandbox name for an org/repo/branch session. Mirrors the gateway/ops
+  /// session-key derivation: the raw triple for the default tenant.
+  String _sandboxName(String org, String repo, String branch) =>
+      '$org:$repo:$branch';
+
+  Future<void> destroySandbox(String name) =>
+      _sandbox.deleteSandbox(sdk.DeleteSandboxRequest(name: name));
 
   Future<List<Deployment>> deployments() async {
     final r = await _ops.listServices(sdk.ListServicesRequest());
@@ -798,9 +842,6 @@ class EasyLabApi {
     return {'ok': r.ok, 'name': r.name, 'url': r.url, 'error': r.error};
   }
 
-  Future<void> destroySandbox(String id) =>
-      _ops.deleteService(sdk.DeleteServiceRequest(name: id));
-
   Future<void> destroyDeployment(String name) =>
       _ops.deleteService(sdk.DeleteServiceRequest(name: name));
 
@@ -818,36 +859,59 @@ class EasyLabApi {
     )).toList();
   }
 
-  /// A session's sandbox jobs surfaced via the Ops task registry
-  /// (easylab Ops ListTasks; each entry maps a session task to a JobInfo).
-  Future<List<JobInfo>> jobs(String session) async {
-    final r = await _ops.listTasks(sdk.ListTasksRequest());
-    return r.tasks
-        .where((t) => t.session == session)
-        .map((t) => JobInfo(
-          id: t.id,
-          command: t.command,
-          state: t.state,
-          exitCode: 0,
-        ))
+  /// A sandbox's worker jobs (easyworker job registry via SandboxService).
+  Future<List<JobInfo>> jobs(String sandbox) async {
+    final r = await _sandbox
+        .listJobs(sdk.ListJobsRequest(sandbox: sandbox, limit: 100));
+    return r.jobs
+        .map((j) => JobInfo(
+              id: j.id,
+              command: j.command,
+              state: j.state,
+              exitCode: j.exitCode,
+              startedAt: j.startedAt.toInt(),
+              finishedAt: j.finishedAt.toInt(),
+            ))
         .toList();
   }
 
-  Future<ExecResult> exec(String session, String command) async {
-    final r = await _ops.sandboxExec(sdk.SandboxExecRequest(
-        name: session, command: command));
+  /// Runs a command in a sandbox: Execute, wait briefly, then read output.
+  Future<ExecResult> exec(String sandbox, String command,
+      {int timeoutMs = 10000}) async {
+    final res = await _sandbox.execute(sdk.ExecuteRequest(
+      sandbox: sandbox,
+      req: worker.ExecuteRequest(command: command),
+    ));
+    final jobId = res.jobId;
+    final wait = await _sandbox.jobWait(sdk.JobWaitRequest(
+      sandbox: sandbox,
+      req: worker.JobWaitRequest(jobId: jobId, timeoutMs: timeoutMs),
+    ));
+    final backgrounded = wait.state == 'running';
+    String output = '';
+    if (!backgrounded) {
+      final out = await _sandbox.jobOutput(sdk.JobOutputRequest(
+        sandbox: sandbox,
+        req: worker.JobOutputRequest(jobId: jobId),
+      ));
+      output = out.lines.join('\n');
+    }
     return ExecResult(
-      exitCode: r.exitCode,
-      output: r.output,
-      jobId: r.jobId,
-      backgrounded: r.backgrounded,
-      note: r.note,
-      error: r.error,
+      exitCode: wait.exitCode,
+      output: output,
+      jobId: jobId,
+      backgrounded: backgrounded,
+      note: backgrounded ? 'still running; poll by job id' : null,
+      error: null,
     );
   }
 
-  Future<void> kill(String session, String jobId) =>
-      _ops.sandboxJobKill(sdk.SandboxJobKillRequest(name: session, jobId: jobId));
+  Future<void> kill(String sandbox, String jobId) => _sandbox.jobKill(
+        sdk.JobKillRequest(
+          sandbox: sandbox,
+          req: worker.JobKillRequest(jobId: jobId),
+        ),
+      );
 
   // ---- packages ----
 

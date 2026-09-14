@@ -6,18 +6,21 @@ import '../api.dart';
 import '../i18n.dart';
 import '../theme/app_theme.dart';
 
-/// Live task output screen. Consumes the agent/ops SSE task log stream
-/// (`/api/v1/builds/{id}/stream` → `log` / `state` / `done` events) and
-/// renders it as a scrolling, selectable log with a status chip. There is no
-/// percentage — progress is conveyed by log volume + final state.
+/// Live CI run output screen. Consumes the gateway's WorkflowService
+/// RunJobLog stream (`{stream, line}` events; stream == `state` marks a
+/// terminal state) and renders it as a scrolling, selectable log with a
+/// status chip. There is no percentage — progress is conveyed by log volume
+/// plus the final state.
 class TaskProgressScreen extends StatefulWidget {
   final EasyLabApi api;
-  final String buildId;
+  final String runId;
+  final String jobId;
   final String title;
   const TaskProgressScreen({
     super.key,
     required this.api,
-    required this.buildId,
+    required this.runId,
+    required this.jobId,
     this.title = '',
   });
 
@@ -39,29 +42,31 @@ class _TaskProgressScreenState extends State<TaskProgressScreen> {
     _connect();
   }
 
+  static const _terminal = {
+    'success',
+    'succeeded',
+    'failure',
+    'failed',
+    'cancelled',
+    'error',
+  };
+
   void _connect() {
-    _sub = widget.api.taskStream(widget.buildId).listen(
+    _sub = widget.api.runJobLog(widget.runId, widget.jobId).listen(
       (ev) {
         if (!mounted || ev is! Map) return;
-        final type = ev['type'] ?? '';
-        final line = ev['line'];
-        if (type == 'state') {
-          final s = ev['state'] as String? ?? '';
-          if (s.isNotEmpty) setState(() => _state = s);
+        final stream = ev['stream'] as String? ?? '';
+        final line = ev['line'] as String? ?? '';
+        if (stream == 'state') {
+          if (line.isNotEmpty) {
+            setState(() {
+              _state = line;
+              if (_terminal.contains(line)) _done = true;
+            });
+          }
           return;
         }
-        if (type == 'done') {
-          final st = ev['state'] as String? ?? _state;
-          final err = ev['error'] as String?;
-          setState(() {
-            _done = true;
-            _state = st;
-            _error = err;
-          });
-          if (err != null && err.isNotEmpty) _lines.add('ERROR: $err');
-          return;
-        }
-        if (line is String) {
+        if (line.isNotEmpty) {
           setState(() => _lines.add(line));
           _autoScroll();
         }
@@ -100,8 +105,8 @@ class _TaskProgressScreenState extends State<TaskProgressScreen> {
     final colors = colorsOf(context);
     final text = textOf(context);
     final stateColor = switch (_state) {
-      'done' || 'succeeded' || 'ok' => colors.success,
-      'failed' || 'error' => colors.destructive,
+      'done' || 'succeeded' || 'success' || 'ok' => colors.success,
+      'failed' || 'failure' || 'error' || 'cancelled' => colors.destructive,
       _ => colors.warning,
     };
     return Scaffold(
@@ -166,7 +171,9 @@ class _TaskProgressScreenState extends State<TaskProgressScreen> {
               alignment: Alignment.center,
               color: stateColor.withValues(alpha: 0.08),
               child: Text(
-                  (_state == 'done' || _state == 'succeeded')
+                  (_state == 'done' ||
+                          _state == 'succeeded' ||
+                          _state == 'success')
                       ? context.l10n.taskDone
                       : context.l10n.taskFailed,
                   style: text.micro.copyWith(color: stateColor)),

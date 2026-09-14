@@ -21,6 +21,10 @@ class _ContainerOverlayState extends State<ContainerOverlay> {
   Sandbox? _sandbox;
   bool _loading = false;
 
+  /// Default base image for a newly created linux sandbox (the worker binary
+  /// is injected by easylab; pick a broadly-capable toolchain image).
+  static const _defaultSandboxImage = 'docker.io/library/alpine:3.20';
+
   String get sessionWorkerId {
     final s = store.activeSession;
     if (s == null) return '';
@@ -51,9 +55,12 @@ class _ContainerOverlayState extends State<ContainerOverlay> {
   }
 
   Future<void> _create() async {
+    final s = store.activeSession;
+    if (s == null) return;
     setState(() => _loading = true);
     try {
-      await store.api.exec(sessionWorkerId, 'true');
+      await store.api.launchSandbox(
+          s.org, s.repo, s.branch, _defaultSandboxImage);
     } catch (_) {}
     await _load();
   }
