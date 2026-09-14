@@ -141,31 +141,8 @@ class EasyLabApi {
     }
   }
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-      };
 
-  Uri _u(String path, [Map<String, dynamic>? query]) {
-    final parsed = Uri.parse('$baseUrl$path');
-    if (query == null || query.isEmpty) return parsed;
-    final orig = parsed.queryParameters;
-    final merged = <String, String>{...orig};
-    query.forEach((k, v) {
-      if (v != null) merged[k] = '$v';
-    });
-    return parsed.replace(queryParameters: merged);
-  }
 
-  String _enc(String s) => Uri.encodeComponent(s);
-
-  // ---- sessions ----
-
-  Future<List<Session>> listSessions() async {
-    final r = await _agent.listSessions(sdk.ListSessionsRequest());
-    return r.sessions.map(sessionFromPb).toList();
-  }
 
   Future<Session> createSession(Map<String, dynamic> params) async {
     final r = await _agent.createSession(sdk.CreateSessionRequest(
@@ -194,6 +171,12 @@ class EasyLabApi {
     }
     return '';
   }
+
+  Future<List<Session>> listSessions() async {
+    final r = await _agent.listSessions(sdk.ListSessionsRequest());
+    return r.sessions.map(sessionFromPb).toList();
+  }
+
 
   // ---- attachment upload (memory-extension /api/v1/files) ----
 
