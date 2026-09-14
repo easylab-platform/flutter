@@ -958,32 +958,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get toolInputParams => 'Input';
 
   @override
-  String get tenantsSection => 'TENANTS';
+  String get tenantsSection => 'USERS';
 
   @override
-  String get tenantsTitle => 'Tenants';
+  String get tenantsTitle => 'Users';
 
   @override
-  String get addTenant => 'New tenant';
+  String get addTenant => 'New user';
 
   @override
-  String get tenantSlug => 'Slug';
+  String get tenantSlug => 'Username';
 
   @override
   String get tenantDisplayName => 'Display name';
 
   @override
-  String get tenantAdminUser => 'Admin username';
+  String get tenantAdminUser => 'Username';
 
   @override
   String get tenantTokenOnce => 'This user\'s token (shown once — copy it now)';
 
   @override
-  String get tenantMembers => 'Members';
+  String get tenantMembers => 'Tokens';
 
   @override
-  String get tenantCreated => 'Tenant created';
+  String get tenantCreated => 'User created';
 
   @override
-  String get tenantsEmpty => 'No tenants yet.';
+  String get tenantsEmpty => 'No users yet.';
 }

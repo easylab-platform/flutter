@@ -575,14 +575,14 @@
   "connected": "Connected",
   "connectionError": "Connection error: {arg1}",
   "toolInputParams": "Input",
-  "tenantsSection": "TENANTS",
-  "tenantsTitle": "Tenants",
-  "addTenant": "New tenant",
-  "tenantSlug": "Slug",
+  "tenantsSection": "USERS",
+  "tenantsTitle": "Users",
+  "addTenant": "New user",
+  "tenantSlug": "Username",
   "tenantDisplayName": "Display name",
-  "tenantAdminUser": "Admin username",
+  "tenantAdminUser": "Username",
   "tenantTokenOnce": "This user's token (shown once — copy it now)",
-  "tenantMembers": "Members",
-  "tenantCreated": "Tenant created",
-  "tenantsEmpty": "No tenants yet."
+  "tenantMembers": "Tokens",
+  "tenantCreated": "User created",
+  "tenantsEmpty": "No users yet."
 }

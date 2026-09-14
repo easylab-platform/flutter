@@ -1300,35 +1300,31 @@ class Release {
       );
 }
 
-/// Tenant (multi-tenancy) DTOs.
-class TenantInfo {
+/// User administration DTOs. A user IS the ownership boundary: it owns
+/// namespaces/repositories, holds tokens, and is bound to its own agent tenant.
+class UserInfo {
   final String id;
-  final String slug;
+  final String username;
   final String displayName;
   final bool disabled;
-  TenantInfo({
+  final String agentTenant;
+  UserInfo({
     required this.id,
-    required this.slug,
+    required this.username,
     required this.displayName,
     required this.disabled,
+    this.agentTenant = '',
   });
 }
 
-class TenantMemberInfo {
-  final String username;
-  final String role;
-  TenantMemberInfo({required this.username, required this.role});
+class UserTokenInfo {
+  final String id;
+  final String createdAt;
+  UserTokenInfo({required this.id, required this.createdAt});
 }
 
-class TenantCreateResult {
-  final TenantInfo tenant;
-  final String username;
+class UserCreateResult {
+  final UserInfo user;
   final String token;
-  final bool agentTenant;
-  TenantCreateResult({
-    required this.tenant,
-    required this.username,
-    required this.token,
-    required this.agentTenant,
-  });
+  UserCreateResult({required this.user, required this.token});
 }

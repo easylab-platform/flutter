@@ -952,32 +952,32 @@ class AppLocalizationsZh extends AppLocalizations {
   String get toolInputParams => '输入参数';
 
   @override
-  String get tenantsSection => '租户';
+  String get tenantsSection => '用户';
 
   @override
-  String get tenantsTitle => '租户';
+  String get tenantsTitle => '用户';
 
   @override
-  String get addTenant => '新建租户';
+  String get addTenant => '新建用户';
 
   @override
-  String get tenantSlug => '标识(slug)';
+  String get tenantSlug => '用户名';
 
   @override
   String get tenantDisplayName => '显示名';
 
   @override
-  String get tenantAdminUser => '管理员用户名';
+  String get tenantAdminUser => '用户名';
 
   @override
   String get tenantTokenOnce => '该用户的令牌(仅显示一次,请立即保存)';
 
   @override
-  String get tenantMembers => '成员';
+  String get tenantMembers => '令牌';
 
   @override
-  String get tenantCreated => '租户已创建';
+  String get tenantCreated => '用户已创建';
 
   @override
-  String get tenantsEmpty => '暂无租户。';
+  String get tenantsEmpty => '暂无用户。';
 }

@@ -1829,25 +1829,25 @@ abstract class AppLocalizations {
   /// No description provided for @tenantsSection.
   ///
   /// In zh, this message translates to:
-  /// **'租户'**
+  /// **'用户'**
   String get tenantsSection;
 
   /// No description provided for @tenantsTitle.
   ///
   /// In zh, this message translates to:
-  /// **'租户'**
+  /// **'用户'**
   String get tenantsTitle;
 
   /// No description provided for @addTenant.
   ///
   /// In zh, this message translates to:
-  /// **'新建租户'**
+  /// **'新建用户'**
   String get addTenant;
 
   /// No description provided for @tenantSlug.
   ///
   /// In zh, this message translates to:
-  /// **'标识(slug)'**
+  /// **'用户名'**
   String get tenantSlug;
 
   /// No description provided for @tenantDisplayName.
@@ -1859,7 +1859,7 @@ abstract class AppLocalizations {
   /// No description provided for @tenantAdminUser.
   ///
   /// In zh, this message translates to:
-  /// **'管理员用户名'**
+  /// **'用户名'**
   String get tenantAdminUser;
 
   /// No description provided for @tenantTokenOnce.
@@ -1871,19 +1871,19 @@ abstract class AppLocalizations {
   /// No description provided for @tenantMembers.
   ///
   /// In zh, this message translates to:
-  /// **'成员'**
+  /// **'令牌'**
   String get tenantMembers;
 
   /// No description provided for @tenantCreated.
   ///
   /// In zh, this message translates to:
-  /// **'租户已创建'**
+  /// **'用户已创建'**
   String get tenantCreated;
 
   /// No description provided for @tenantsEmpty.
   ///
   /// In zh, this message translates to:
-  /// **'暂无租户。'**
+  /// **'暂无用户。'**
   String get tenantsEmpty;
 }
 

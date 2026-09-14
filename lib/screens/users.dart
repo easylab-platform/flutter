@@ -5,19 +5,19 @@ import '../i18n.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
 
-/// Tenant administration (multi-tenancy): list tenants, create one (returns
-/// its first user's one-time token), and view members. Operator-gated on the
-/// server: creating tenants requires the default-tenant operator credential.
-class TenantsDetail extends StatefulWidget {
+/// User administration. A user IS the ownership boundary: it owns namespaces
+/// and repositories, holds tokens, and is bound to its own agent tenant.
+/// Create/disable/delete requires the server's admin credential.
+class UsersDetail extends StatefulWidget {
   final EasyLabApi api;
-  const TenantsDetail({super.key, required this.api});
+  const UsersDetail({super.key, required this.api});
 
   @override
-  State<TenantsDetail> createState() => _TenantsDetailState();
+  State<UsersDetail> createState() => _UsersDetailState();
 }
 
-class _TenantsDetailState extends State<TenantsDetail> {
-  List<TenantInfo> _tenants = [];
+class _UsersDetailState extends State<UsersDetail> {
+  List<UserInfo> _users = [];
   bool _loading = true;
 
   @override
@@ -29,19 +29,18 @@ class _TenantsDetailState extends State<TenantsDetail> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final t = await widget.api.tenants();
-      if (mounted) setState(() => _tenants = t);
+      final u = await widget.api.users();
+      if (mounted) setState(() => _users = u);
     } catch (_) {
-      // Auth/operator errors surface via the app-level dialog.
+      // Auth/admin errors surface via the app-level dialog.
     }
     if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _create() async {
-    final slug = TextEditingController();
+    final username = TextEditingController();
     final name = TextEditingController();
-    final admin = TextEditingController();
-    final created = await showDialog<TenantCreateResult>(
+    final created = await showDialog<UserCreateResult>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ctx.l10n.addTenant),
@@ -49,16 +48,13 @@ class _TenantsDetailState extends State<TenantsDetail> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-                controller: slug,
-                decoration: InputDecoration(labelText: ctx.l10n.tenantSlug)),
+                controller: username,
+                decoration:
+                    InputDecoration(labelText: ctx.l10n.tenantSlug)),
             TextField(
                 controller: name,
                 decoration:
                     InputDecoration(labelText: ctx.l10n.tenantDisplayName)),
-            TextField(
-                controller: admin,
-                decoration:
-                    InputDecoration(labelText: ctx.l10n.tenantAdminUser)),
           ],
         ),
         actions: [
@@ -68,10 +64,9 @@ class _TenantsDetailState extends State<TenantsDetail> {
           FilledButton(
             onPressed: () async {
               try {
-                final r = await widget.api.createTenant(
-                  slug: slug.text.trim(),
+                final r = await widget.api.createUser(
+                  username: username.text.trim(),
                   displayName: name.text.trim(),
-                  adminUsername: admin.text.trim(),
                 );
                 if (ctx.mounted) Navigator.pop(ctx, r);
               } catch (e) {
@@ -94,7 +89,7 @@ class _TenantsDetailState extends State<TenantsDetail> {
         builder: (ctx) => AlertDialog(
           title: Text(ctx.l10n.tenantCreated),
           content: SelectableText(
-              '${created.username}\n\n${ctx.l10n.tenantTokenOnce}\n\n${created.token}'),
+              '${created.user.username}\n\n${ctx.l10n.tenantTokenOnce}\n\n${created.token}'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -105,24 +100,25 @@ class _TenantsDetailState extends State<TenantsDetail> {
     }
   }
 
-  Future<void> _members(TenantInfo t) async {
-    List<TenantMemberInfo> members = [];
+  Future<void> _tokens(UserInfo u) async {
+    List<UserTokenInfo> tokens = [];
     try {
-      members = await widget.api.tenantMembers(t.id);
+      tokens = await widget.api.userTokens(u.id);
     } catch (_) {}
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('${t.slug} · ${ctx.l10n.tenantMembers}'),
+        title: Text('${u.username} · ${ctx.l10n.tenantMembers}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final m in members)
+            if (tokens.isEmpty) Text(ctx.l10n.tenantsEmpty),
+            for (final t in tokens)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text('${m.username}  ·  ${m.role}'),
+                child: Text('#${t.id}  ·  ${t.createdAt}'),
               ),
           ],
         ),
@@ -157,29 +153,29 @@ class _TenantsDetailState extends State<TenantsDetail> {
               ),
             ],
           ),
-          if (_tenants.isEmpty)
+          if (_users.isEmpty)
             Padding(
               padding: const EdgeInsets.all(AppSpacing.md),
               child: Text(context.l10n.tenantsEmpty,
                   style: TextStyle(color: colors.mutedForeground)),
             ),
-          for (final t in _tenants)
+          for (final u in _users)
             Card(
               margin: const EdgeInsets.only(top: AppSpacing.sm),
               child: ListTile(
                 leading: Icon(
-                  t.disabled
+                  u.disabled
                       ? Icons.block_outlined
-                      : Icons.apartment_outlined,
-                  color: t.disabled ? colors.mutedForeground : colors.primary,
+                      : Icons.person_outline_rounded,
+                  color: u.disabled ? colors.mutedForeground : colors.primary,
                 ),
-                title: Text(t.displayName.isEmpty ? t.slug : t.displayName),
-                subtitle: Text('#${t.id} · ${t.slug}',
+                title: Text(u.displayName.isEmpty ? u.username : u.displayName),
+                subtitle: Text('#${u.id} · ${u.username}',
                     style: textOf(context)
                         .micro
                         .copyWith(color: colors.mutedForeground)),
                 trailing: const Icon(Icons.chevron_right, size: 18),
-                onTap: () => _members(t),
+                onTap: () => _tokens(u),
               ),
             ),
         ],

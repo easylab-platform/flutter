@@ -7,7 +7,7 @@ import '../navigation.dart';
 import '../prefs.dart';
 import '../store.dart';
 import '../theme/app_theme.dart';
-import 'tenants.dart';
+import 'users.dart';
 import '../services/models_dev.dart';
 import '../widgets/dialogs.dart';
 
@@ -230,7 +230,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       case 'tools':
         return _toolsDetail();
       case 'tenants':
-        return TenantsDetail(api: store.api);
+        return UsersDetail(api: store.api);
       default:
         return const SizedBox.shrink();
     }

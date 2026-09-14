@@ -46,7 +46,7 @@ class EasyLabApi {
   late final sdk.LabServiceClient _lab;
   late final sdk.OpsServiceClient _ops;
   late final sdk.RegistryServiceClient _registry;
-  late final sdk.TenantServiceClient _tenant;
+  late final sdk.UserServiceClient _user;
 
   EasyLabApi({required this.baseUrl, required this.token})
       : client = http.Client() {
@@ -65,7 +65,7 @@ class EasyLabApi {
     _lab = sdk.LabServiceClient(_transport);
     _ops = sdk.OpsServiceClient(_transport);
     _registry = sdk.RegistryServiceClient(_transport);
-    _tenant = sdk.TenantServiceClient(_transport);
+    _user = sdk.UserServiceClient(_transport);
   }
 
   /// Build the h2-over-TLS gateway transport (ALPN `h2`, bundled CA).
@@ -837,59 +837,61 @@ class EasyLabApi {
     final r = await _registry.oCICatalog(sdk.OCICatalogRequest());
     return r.repositories.toList();
   }
-  // ---- tenants ----
+  // ---- users ----
 
-  Future<List<TenantInfo>> tenants() async {
-    final r = await _tenant.listTenants(sdk.ListTenantsRequest());
-    return r.tenants
-        .map((t) => TenantInfo(
-              id: t.id,
-              slug: t.slug,
-              displayName: t.displayName,
-              disabled: t.disabled,
+  Future<List<UserInfo>> users() async {
+    final r = await _user.listUsers(sdk.ListUsersRequest());
+    return r.users
+        .map((u) => UserInfo(
+              id: u.id,
+              username: u.username,
+              displayName: u.displayName,
+              disabled: u.disabled,
+              agentTenant: u.agentTenant,
             ))
         .toList();
   }
 
-  Future<TenantCreateResult> createTenant({
-    required String slug,
-    required String displayName,
-    required String adminUsername,
-    String adminDisplayName = '',
+  Future<UserCreateResult> createUser({
+    required String username,
+    String displayName = '',
+    bool provisionAgentTenant = false,
   }) async {
-    final r = await _tenant.createTenant(sdk.CreateTenantRequest(
-      slug: slug,
+    final r = await _user.createUser(sdk.CreateUserRequest(
+      username: username,
       displayName: displayName,
-      adminUsername: adminUsername,
-      adminDisplayName: adminDisplayName,
+      provisionAgentTenant: provisionAgentTenant,
     ));
-    return TenantCreateResult(
-      tenant: TenantInfo(
-        id: r.tenant.id,
-        slug: r.tenant.slug,
-        displayName: r.tenant.displayName,
-        disabled: r.tenant.disabled,
+    return UserCreateResult(
+      user: UserInfo(
+        id: r.user.id,
+        username: r.user.username,
+        displayName: r.user.displayName,
+        disabled: r.user.disabled,
+        agentTenant: r.user.agentTenant,
       ),
-      username: r.member.username,
       token: r.token,
-      agentTenant: r.agentTenant,
     );
   }
 
-  Future<void> updateTenant(String id,
+  Future<void> updateUser(String id,
       {String? displayName, bool? disabled}) async {
-    await _tenant.updateTenant(sdk.UpdateTenantRequest(
+    await _user.updateUser(sdk.UpdateUserRequest(
       id: id,
       displayName: displayName,
       disabled: disabled,
     ));
   }
 
-  Future<List<TenantMemberInfo>> tenantMembers(String tenantId) async {
-    final r = await _tenant
-        .listTenantMembers(sdk.ListTenantMembersRequest(tenantId: tenantId));
-    return r.members
-        .map((m) => TenantMemberInfo(username: m.username, role: m.role))
+  Future<void> deleteUser(String id) async {
+    await _user.deleteUser(sdk.DeleteUserRequest(id: id));
+  }
+
+  Future<List<UserTokenInfo>> userTokens(String userId) async {
+    final r = await _user
+        .listUserTokens(sdk.ListUserTokensRequest(userId: userId));
+    return r.tokens
+        .map((t) => UserTokenInfo(id: t.id, createdAt: t.createdAt))
         .toList();
   }
 }
