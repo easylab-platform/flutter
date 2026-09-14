@@ -1256,4 +1256,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get changeVisibility => '修改可见性';
+
+  @override
+  String get sessionGroupLabel => '分组';
+
+  @override
+  String get subsessionBadge => '子会话';
 }

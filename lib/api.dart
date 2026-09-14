@@ -157,8 +157,9 @@ class EasyLabApi {
       org: (params['org'] as String?) ?? '',
       repo: (params['repo'] as String?) ?? '',
       branch: (params['branch'] as String?) ?? '',
+      group: (params['group'] as String?) ?? '',
     ));
-    return Session(id: r.sessionName, model: (params['model'] as String?) ?? '', org: (params['org'] as String?) ?? '', repo: (params['repo'] as String?) ?? '', branch: (params['branch'] as String?) ?? '');
+    return Session(id: r.sessionName, model: (params['model'] as String?) ?? '', org: (params['org'] as String?) ?? '', repo: (params['repo'] as String?) ?? '', branch: (params['branch'] as String?) ?? '', group: (params['group'] as String?) ?? '');
   }
 
   Future<Session> getSession(String id) async {
@@ -1081,6 +1082,7 @@ Session sessionFromPb(sdk.Session s) => Session(
   unreadCount: s.unreadCount,
   lastMessageAt: s.lastMessageAt,
   lastMessagePreview: s.lastMessagePreview,
+  group: s.group,
 );
 
 Session _sessionFromSessionResults(sdk.Session? s) => s == null ? Session(id: '') : sessionFromPb(s);

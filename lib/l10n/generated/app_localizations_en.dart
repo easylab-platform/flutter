@@ -1269,4 +1269,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get changeVisibility => 'Change visibility';
+
+  @override
+  String get sessionGroupLabel => 'Group';
+
+  @override
+  String get subsessionBadge => 'Subsession';
 }

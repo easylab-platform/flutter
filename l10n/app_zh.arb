@@ -694,5 +694,7 @@
   "repoVisibility": "可见性",
   "visibilityPublic": "公开",
   "visibilityPrivate": "私有",
-  "changeVisibility": "修改可见性"
+  "changeVisibility": "修改可见性",
+  "sessionGroupLabel": "分组",
+  "subsessionBadge": "子会话"
 }

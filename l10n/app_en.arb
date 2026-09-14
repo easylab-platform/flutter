@@ -701,5 +701,7 @@
   "repoVisibility": "Visibility",
   "visibilityPublic": "Public",
   "visibilityPrivate": "Private",
-  "changeVisibility": "Change visibility"
+  "changeVisibility": "Change visibility",
+  "sessionGroupLabel": "Group",
+  "subsessionBadge": "Subsession"
 }
